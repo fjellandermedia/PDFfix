@@ -13,8 +13,8 @@ Allt sker i webbläsaren. Ingen fil skickas någonstans och ingen webbserver beh
      utsidan av häftet skannades först (uppslagen kommer då som 4|1 och 2|3).
      Välj `4,1,2,3` om insidan skannades först. Du kan också skriva en egen ordning,
      till exempel `2,3,6,7,8,5,4,1` för häften med två ark (åtta sidor). Antalet tal avgör gruppstorleken.
-   - **Uppdelning i filer**: välj *En fil per häfte (4 sidor)* eller *(8 sidor)*, eller ett eget antal sidor per fil,
-     för att få en pdf per häfte. Du får då en zip-fil med alla häften samt länkar till varje enskild fil.
+   - **Uppdelning i filer**: standard är *Alla sidor i en fil*. Välj *Ett ark per fil (4 sidor)*,
+     *Två ark per fil (8 sidor)* eller *Eget antal sidor per fil* för att få en pdf per häfte. Du får då en zip-fil med alla häften samt länkar till varje enskild fil.
      Filerna heter `<original>-hafte-1.pdf`, `<original>-hafte-2.pdf` och så vidare.
    - **Dela bara liggande sidor**: stående sidor i filen lämnas hela.
    - **Byt plats på vänster och höger halva**: prova om sidorna hamnar parvis fel.
