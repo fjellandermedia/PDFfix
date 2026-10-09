@@ -12,9 +12,13 @@ Allt sker i webbläsaren. Ingen fil skickas någonstans och ingen webbserver beh
      ny sida 2 = gammal sida 1, ny sida 3 = gammal sida 2, ny sida 4 = gammal sida 3.
      Välj `2,3,4,1` om utsidan av häftet skannades först. Du kan också skriva en egen ordning,
      till exempel `2,3,6,7,8,5,4,1` för häften med två ark (åtta sidor). Antalet tal avgör gruppstorleken.
+   - **Uppdelning i filer**: välj *En fil per häfte (4 sidor)* eller *(8 sidor)*, eller ett eget antal sidor per fil,
+     för att få en pdf per häfte. Du får då en zip-fil med alla häften samt länkar till varje enskild fil.
+     Filerna heter `<original>-hafte-1.pdf`, `<original>-hafte-2.pdf` och så vidare.
    - **Dela bara liggande sidor**: stående sidor i filen lämnas hela.
    - **Byt plats på vänster och höger halva**: prova om sidorna hamnar parvis fel.
-4. Klicka på **Dela och sortera**, titta på förhandsgranskningen och klicka på **Ladda ner resultatet**.
+4. Klicka på **Dela och sortera**, titta på förhandsgranskningen och klicka på **Ladda ner resultatet**
+   (eller **Ladda ner alla som zip** om du valt uppdelning per häfte).
 
 Delningen görs utan att bilderna packas om, så kvaliteten blir densamma som i originalet.
 
@@ -35,4 +39,5 @@ Fungerar i Chrome, Edge, Firefox och Safari utan internetanslutning.
 
 - [pdf-lib](https://pdf-lib.js.org/) klipper sidorna (via sidrutor, utan omkodning) och bygger den nya pdf-filen.
 - [pdf.js](https://mozilla.github.io/pdf.js/) ritar förhandsgranskningen.
+- Zip-filen skapas av en liten inbyggd zip-skrivare utan komprimering (pdf-filer är redan komprimerade).
 - Båda biblioteken ligger i `vendor/` så att sidan fungerar utan nätverk. Licenser finns i samma mapp.

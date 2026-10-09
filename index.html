@@ -59,6 +59,8 @@
   main { max-width: 960px; margin: 0 auto; }
   h1 { font-size: 1.6rem; margin: 0 0 4px; }
   h2 { font-size: 1.1rem; margin: 0 0 12px; }
+  h3 { font-size: 1rem; margin: 18px 0 6px; grid-column: 1 / -1; }
+  h3:first-child { margin-top: 0; }
   p.lead { color: var(--muted); margin: 0 0 24px; }
   .panel {
     background: var(--panel);
@@ -88,7 +90,10 @@
   label.field { display: block; }
   label.field > span { display: block; font-weight: 600; margin-bottom: 4px; }
   label.field small { display: block; color: var(--muted); font-weight: 400; margin-top: 4px; }
-  select, input[type="text"] {
+  .row { display: flex; gap: 8px; }
+  .row select { flex: 1; }
+  .row input[type="number"] { width: 6em; }
+  select, input[type="text"], input[type="number"] {
     width: 100%;
     font: inherit;
     padding: 8px 10px;
@@ -139,8 +144,11 @@
     margin-bottom: 4px;
   }
   .thumb b { color: var(--text); display: block; }
-  details { margin-top: 10px; }
+  details { margin-top: 12px; font-size: .95rem; }
   summary { cursor: pointer; color: var(--accent); }
+  details ul { margin: 8px 0 0; padding-left: 20px; columns: 2; column-gap: 24px; }
+  details li { break-inside: avoid; }
+  details a { color: var(--accent); }
   code { font-size: .9em; }
   footer { color: var(--muted); font-size: .85rem; margin-top: 32px; }
 </style>
@@ -179,6 +187,19 @@
         <input type="text" id="order" value="4,1,2,3" spellcheck="false">
         <small><code>4,1,2,3</code> betyder: ny sida 1 = gammal sida 4, ny sida 2 = gammal sida 1, ny sida 3 = gammal sida 2, ny sida 4 = gammal sida 3. Antalet tal bestämmer gruppstorleken.</small>
       </label>
+      <label class="field">
+        <span>Uppdelning i filer</span>
+        <div class="row">
+          <select id="splitMode">
+            <option value="0">En fil med allt</option>
+            <option value="4">En fil per häfte (4 sidor)</option>
+            <option value="8">En fil per häfte (8 sidor)</option>
+            <option value="custom">Eget antal sidor per fil…</option>
+          </select>
+          <input type="number" id="pagesPerFile" min="1" step="1" value="4" hidden aria-label="Sidor per fil">
+        </div>
+        <small>Vid uppdelning får du en zip-fil med en pdf per häfte, samt länkar till varje fil.</small>
+      </label>
       <label class="check">
         <input type="checkbox" id="onlyLandscape" checked>
         <span>Dela bara liggande sidor<small>Stående sidor i filen behålls hela och räknas som en sida.</small></span>
@@ -194,6 +215,10 @@
       <span class="status" id="status"></span>
     </div>
     <div class="log" id="log"></div>
+    <details id="fileList" hidden>
+      <summary>Ladda ner enskilda filer</summary>
+      <ul></ul>
+    </details>
   </section>
 
   <section class="panel" id="previewPanel" hidden>
@@ -221,14 +246,16 @@
   const els = {
     drop: $('drop'), file: $('file'), filename: $('filename'),
     preset: $('preset'), order: $('order'), onlyLandscape: $('onlyLandscape'), swap: $('swap'),
+    splitMode: $('splitMode'), pagesPerFile: $('pagesPerFile'),
     run: $('run'), download: $('download'), status: $('status'), log: $('log'),
+    fileList: $('fileList'), fileListItems: $('fileList').querySelector('ul'),
     previewPanel: $('previewPanel'), thumbs: $('thumbs'), more: $('more'),
   };
 
   let sourceBytes = null;   // ArrayBuffer of the loaded PDF
   let sourceName = '';
-  let resultUrl = null;     // blob URL of the result
-  let preview = null;       // { pdf, pages: [provenance], rendered }
+  let objectUrls = [];      // blob URLs of the results
+  let preview = null;       // { docs: [{ name, pdf, provenance }], queue, pos }
 
   if (window.pdfjsLib) {
     // Works from file:// too: if the real worker cannot start, pdf.js
@@ -245,15 +272,27 @@
     els.log.textContent += (els.log.textContent ? '\n' : '') + text;
   }
   function clearResult() {
-    if (resultUrl) { URL.revokeObjectURL(resultUrl); resultUrl = null; }
+    objectUrls.forEach((u) => URL.revokeObjectURL(u));
+    objectUrls = [];
     els.download.hidden = true;
     els.download.removeAttribute('href');
+    els.fileList.hidden = true;
+    els.fileList.open = false;
+    els.fileListItems.innerHTML = '';
     els.previewPanel.hidden = true;
     els.thumbs.innerHTML = '';
     els.more.hidden = true;
     els.log.textContent = '';
-    if (preview && preview.pdf) { preview.pdf.destroy(); }
+    if (preview) preview.docs.forEach((d) => d.pdf.destroy());
     preview = null;
+  }
+  function makeUrl(bytes, type) {
+    const url = URL.createObjectURL(new Blob([bytes], { type }));
+    objectUrls.push(url);
+    return url;
+  }
+  function baseName() {
+    return (sourceName || 'skrivhaften').replace(/\.pdf$/i, '');
   }
 
   // ---------- File handling ----------
@@ -315,6 +354,18 @@
     return nums;
   }
 
+  // ---------- Split settings ----------
+  els.splitMode.addEventListener('change', () => {
+    els.pagesPerFile.hidden = els.splitMode.value !== 'custom';
+    if (!els.pagesPerFile.hidden) els.pagesPerFile.focus();
+  });
+  function pagesPerFile() {
+    if (els.splitMode.value === '0') return 0;
+    const n = els.splitMode.value === 'custom' ? Number(els.pagesPerFile.value) : Number(els.splitMode.value);
+    if (!Number.isInteger(n) || n < 1) throw new Error('Antal sidor per fil måste vara ett heltal större än 0.');
+    return n;
+  }
+
   // ---------- Geometry ----------
   // Returns the visually left and right halves of a page as boxes in the
   // page's own (unrotated) coordinate system, taking /Rotate into account.
@@ -345,41 +396,46 @@
   }
 
   // ---------- Core processing ----------
+  // Builds one output PDF from a list of plan entries { srcIndex, box }.
+  async function buildDoc(src, entries, title) {
+    const { PDFDocument } = PDFLib;
+    const out = await PDFDocument.create();
+    const copied = await out.copyPages(src, entries.map((e) => e.srcIndex));
+    copied.forEach((page, k) => {
+      if (entries[k].box) applyBox(page, entries[k].box);
+      out.addPage(page);
+    });
+    out.setTitle(title);
+    out.setProducer('Skrivhäftesfix');
+    return out.save();
+  }
+
   async function process() {
     const { PDFDocument } = PDFLib;
     const order = parseOrder(els.order.value);
+    const perFile = pagesPerFile();
     const onlyLandscape = els.onlyLandscape.checked;
     const swap = els.swap.checked;
 
     const src = await PDFDocument.load(sourceBytes, { ignoreEncryption: true });
     const srcPages = src.getPages();
-    const out = await PDFDocument.create();
 
     // Plan: one entry per output page before sorting.
-    // Each entry: { srcIndex, half: 'left' | 'right' | null }
+    // Each entry: { srcIndex, half: 'left' | 'right' | null, box }
     const plan = [];
-    const copyIndices = [];
     let splitCount = 0, keptCount = 0;
     srcPages.forEach((page, i) => {
       const geo = halfBoxes(page);
       if (onlyLandscape && !geo.landscape) {
         plan.push({ srcIndex: i, half: null, box: null });
-        copyIndices.push(i);
         keptCount++;
       } else {
         const first = swap ? 'right' : 'left';
         const second = swap ? 'left' : 'right';
         plan.push({ srcIndex: i, half: first, box: geo[first] });
         plan.push({ srcIndex: i, half: second, box: geo[second] });
-        copyIndices.push(i, i);
         splitCount++;
       }
-    });
-
-    const copied = await out.copyPages(src, copyIndices);
-    copied.forEach((page, k) => {
-      if (plan[k].box) applyBox(page, plan[k].box);
-      plan[k].page = page;
     });
 
     // Reorder in groups of order.length
@@ -393,15 +449,35 @@
     const remainder = plan.slice(i);
     sorted.push(...remainder);
 
-    sorted.forEach((entry) => out.addPage(entry.page));
-    out.setTitle((sourceName || 'skrivhäften').replace(/\.pdf$/i, '') + ' (sorterad)');
-    out.setProducer('Skrivhäftesfix');
+    // Split into files
+    const chunks = [];
+    if (perFile === 0) {
+      chunks.push(sorted);
+    } else {
+      for (let k = 0; k < sorted.length; k += perFile) chunks.push(sorted.slice(k, k + perFile));
+    }
 
-    const bytes = await out.save();
+    const files = [];
+    const pad = String(chunks.length).length;
+    for (let c = 0; c < chunks.length; c++) {
+      const single = perFile === 0;
+      const name = single
+        ? baseName() + '-sorterad.pdf'
+        : baseName() + '-hafte-' + String(c + 1).padStart(pad, '0') + '.pdf';
+      const title = single ? baseName() + ' (sorterad)' : baseName() + ' häfte ' + (c + 1);
+      setStatus('Bearbetar fil ' + (c + 1) + ' av ' + chunks.length + '…', '');
+      const bytes = await buildDoc(src, chunks[c], title);
+      files.push({ name, bytes, provenance: chunks[c].map((e) => ({ srcIndex: e.srcIndex, half: e.half })) });
+    }
+
+    const lastShort = perFile > 0 && chunks.length > 0 && chunks[chunks.length - 1].length < perFile;
     return {
-      bytes,
-      provenance: sorted.map((e) => ({ srcIndex: e.srcIndex, half: e.half })),
-      stats: { srcCount: srcPages.length, splitCount, keptCount, outCount: sorted.length, remainder: remainder.length, groupSize: n },
+      files,
+      stats: {
+        srcCount: srcPages.length, splitCount, keptCount, outCount: sorted.length,
+        remainder: remainder.length, groupSize: n, perFile, lastShort,
+        lastSize: chunks.length ? chunks[chunks.length - 1].length : 0,
+      },
     };
   }
 
@@ -413,18 +489,47 @@
     try {
       const result = await process();
       const s = result.stats;
+      let warn = false;
       log('Original: ' + s.srcCount + ' sidor. Delade: ' + s.splitCount + '. Behållna hela: ' + s.keptCount + '.');
       log('Resultat: ' + s.outCount + ' sidor, sorterade i grupper om ' + s.groupSize + '.');
       if (s.remainder > 0) {
+        warn = true;
         log('Obs: de sista ' + s.remainder + ' sidorna bildar ingen hel grupp och lämnades i ursprunglig ordning.');
       }
-      const blob = new Blob([result.bytes], { type: 'application/pdf' });
-      resultUrl = URL.createObjectURL(blob);
-      els.download.href = resultUrl;
-      els.download.download = (sourceName || 'skrivhaften').replace(/\.pdf$/i, '') + '-sorterad.pdf';
+      if (s.perFile > 0) {
+        log(result.files.length === 1
+          ? 'Allt rymdes i en fil (högst ' + s.perFile + ' sidor per fil).'
+          : 'Uppdelat i ' + result.files.length + ' filer med ' + s.perFile + ' sidor i varje.');
+        if (s.lastShort) {
+          warn = true;
+          log('Obs: den sista filen fick bara ' + s.lastSize + ' sidor.');
+        }
+      }
+
+      if (result.files.length === 1) {
+        const f = result.files[0];
+        els.download.href = makeUrl(f.bytes, 'application/pdf');
+        els.download.download = f.name;
+        els.download.textContent = 'Ladda ner resultatet';
+      } else {
+        const zipBytes = makeZip(result.files.map((f) => ({ name: f.name, data: f.bytes })));
+        els.download.href = makeUrl(zipBytes, 'application/zip');
+        els.download.download = baseName() + '-haften.zip';
+        els.download.textContent = 'Ladda ner alla som zip (' + result.files.length + ' filer)';
+        result.files.forEach((f) => {
+          const li = document.createElement('li');
+          const a = document.createElement('a');
+          a.href = makeUrl(f.bytes, 'application/pdf');
+          a.download = f.name;
+          a.textContent = f.name;
+          li.appendChild(a);
+          els.fileListItems.appendChild(li);
+        });
+        els.fileList.hidden = false;
+      }
       els.download.hidden = false;
-      setStatus(s.remainder > 0 ? 'Klart, med anmärkning.' : 'Klart!', s.remainder > 0 ? 'warn' : 'ok');
-      await showPreview(result.bytes, result.provenance);
+      setStatus(warn ? 'Klart, med anmärkning.' : 'Klart!', warn ? 'warn' : 'ok');
+      await showPreview(result.files);
     } catch (err) {
       console.error(err);
       setStatus('Det gick inte: ' + (err && err.message ? err.message : err), 'err');
@@ -433,27 +538,123 @@
     }
   });
 
+  // ---------- Minimal ZIP writer (store only, no compression) ----------
+  const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+  function crc32(bytes) {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  function dosDateTime(d) {
+    const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    const date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    return { time, date };
+  }
+  function makeZip(entries) {
+    const enc = new TextEncoder();
+    const now = dosDateTime(new Date());
+    const parts = [];
+    const central = [];
+    let offset = 0;
+    for (const e of entries) {
+      const name = enc.encode(e.name);
+      const data = e.data instanceof Uint8Array ? e.data : new Uint8Array(e.data);
+      const crc = crc32(data);
+      const local = new DataView(new ArrayBuffer(30));
+      local.setUint32(0, 0x04034b50, true);
+      local.setUint16(4, 20, true);        // version needed
+      local.setUint16(6, 0x0800, true);    // flags: UTF-8 names
+      local.setUint16(8, 0, true);         // method: store
+      local.setUint16(10, now.time, true);
+      local.setUint16(12, now.date, true);
+      local.setUint32(14, crc, true);
+      local.setUint32(18, data.length, true);
+      local.setUint32(22, data.length, true);
+      local.setUint16(26, name.length, true);
+      local.setUint16(28, 0, true);
+      parts.push(new Uint8Array(local.buffer), name, data);
+
+      const cd = new DataView(new ArrayBuffer(46));
+      cd.setUint32(0, 0x02014b50, true);
+      cd.setUint16(4, 20, true);           // version made by
+      cd.setUint16(6, 20, true);           // version needed
+      cd.setUint16(8, 0x0800, true);
+      cd.setUint16(10, 0, true);
+      cd.setUint16(12, now.time, true);
+      cd.setUint16(14, now.date, true);
+      cd.setUint32(16, crc, true);
+      cd.setUint32(20, data.length, true);
+      cd.setUint32(24, data.length, true);
+      cd.setUint16(28, name.length, true);
+      cd.setUint16(30, 0, true);           // extra
+      cd.setUint16(32, 0, true);           // comment
+      cd.setUint16(34, 0, true);           // disk
+      cd.setUint16(36, 0, true);           // internal attrs
+      cd.setUint32(38, 0, true);           // external attrs
+      cd.setUint32(42, offset, true);
+      central.push(new Uint8Array(cd.buffer), name);
+      offset += 30 + name.length + data.length;
+    }
+    const cdSize = central.reduce((s, p) => s + p.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true);
+    end.setUint16(4, 0, true);
+    end.setUint16(6, 0, true);
+    end.setUint16(8, entries.length, true);
+    end.setUint16(10, entries.length, true);
+    end.setUint32(12, cdSize, true);
+    end.setUint32(16, offset, true);
+    end.setUint16(20, 0, true);
+    const all = [...parts, ...central, new Uint8Array(end.buffer)];
+    const total = all.reduce((s, p) => s + p.length, 0);
+    const out = new Uint8Array(total);
+    let pos = 0;
+    for (const p of all) { out.set(p, pos); pos += p.length; }
+    return out;
+  }
+
   // ---------- Preview ----------
   const PREVIEW_BATCH = 16;
-  async function showPreview(bytes, provenance) {
+  async function showPreview(files) {
     if (!window.pdfjsLib) return;
     els.previewPanel.hidden = false;
     try {
-      const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
-      preview = { pdf, provenance, rendered: 0 };
+      const docs = [];
+      const queue = [];
+      for (let f = 0; f < files.length; f++) {
+        const pdf = await pdfjsLib.getDocument({ data: files[f].bytes.slice(0) }).promise;
+        docs.push({ name: files[f].name, pdf, provenance: files[f].provenance });
+        for (let p = 1; p <= pdf.numPages; p++) queue.push({ f, p });
+      }
+      preview = { docs, queue, pos: 0, multi: files.length > 1 };
       await renderMore();
     } catch (err) {
       console.error(err);
-      log('Förhandsgranskningen kunde inte visas (' + err.message + '), men filen går ändå att ladda ner.');
+      log('Förhandsgranskningen kunde inte visas (' + err.message + '), men filerna går ändå att ladda ner.');
     }
   }
   async function renderMore() {
     if (!preview) return;
-    const { pdf, provenance } = preview;
-    const end = Math.min(pdf.numPages, preview.rendered + PREVIEW_BATCH);
+    const { docs, queue } = preview;
+    const end = Math.min(queue.length, preview.pos + PREVIEW_BATCH);
     els.more.hidden = true;
-    for (let p = preview.rendered + 1; p <= end; p++) {
-      const page = await pdf.getPage(p);
+    for (let q = preview.pos; q < end; q++) {
+      const { f, p } = queue[q];
+      const doc = docs[f];
+      if (preview.multi && p === 1) {
+        const h = document.createElement('h3');
+        h.textContent = doc.name;
+        els.thumbs.appendChild(h);
+      }
+      const page = await doc.pdf.getPage(p);
       const base = page.getViewport({ scale: 1 });
       const scale = 240 / base.width;
       const viewport = page.getViewport({ scale });
@@ -462,20 +663,20 @@
       canvas.height = Math.ceil(viewport.height);
       await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
 
-      const info = provenance[p - 1];
+      const info = doc.provenance[p - 1];
       const div = document.createElement('div');
       div.className = 'thumb';
       const label = document.createElement('b');
-      label.textContent = 'Ny sida ' + p;
+      label.textContent = (preview.multi ? 'Sida ' : 'Ny sida ') + p;
       const origin = document.createElement('span');
       origin.textContent = 'från sida ' + (info.srcIndex + 1) + (info.half ? (info.half === 'left' ? ' V' : ' H') : '');
       div.append(canvas, label, origin);
       els.thumbs.appendChild(div);
       page.cleanup();
     }
-    preview.rendered = end;
-    els.more.hidden = end >= pdf.numPages;
-    els.more.textContent = 'Visa fler sidor (' + (pdf.numPages - end) + ' kvar)';
+    preview.pos = end;
+    els.more.hidden = end >= queue.length;
+    els.more.textContent = 'Visa fler sidor (' + (queue.length - end) + ' kvar)';
   }
   els.more.addEventListener('click', renderMore);
 })();
