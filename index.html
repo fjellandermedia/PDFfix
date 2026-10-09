@@ -134,7 +134,7 @@
     gap: 14px;
     margin-top: 12px;
   }
-  .thumb { text-align: center; font-size: .8rem; color: var(--muted); }
+  .thumb { position: relative; text-align: center; font-size: .8rem; color: var(--muted); }
   .thumb canvas {
     width: 100%;
     height: auto;
@@ -142,8 +142,42 @@
     background: #fff;
     display: block;
     margin-bottom: 4px;
+    transition: opacity .15s;
   }
   .thumb b { color: var(--text); display: block; }
+  .thumb .remove {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 26px;
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+    opacity: .9;
+  }
+  .thumb .remove:hover, .thumb .remove:focus-visible {
+    opacity: 1;
+    background: var(--err);
+    border-color: var(--err);
+    color: #fff;
+  }
+  .thumb.removed canvas { opacity: .2; }
+  .thumb.removed b { text-decoration: line-through; }
+  .thumb.removed .remove,
+  .thumb.removed .remove:hover, .thumb.removed .remove:focus-visible {
+    opacity: 1;
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+  }
   details { margin-top: 12px; font-size: .95rem; }
   summary { cursor: pointer; color: var(--accent); }
   details ul { margin: 8px 0 0; padding-left: 20px; columns: 2; column-gap: 24px; }
@@ -223,7 +257,8 @@
 
   <section class="panel" id="previewPanel" hidden>
     <h2>3. Förhandsgranskning av resultatet</h2>
-    <p class="lead" style="margin-bottom:0">Under varje bild står var sidan kom ifrån i originalet (V = vänster halva, H = höger halva).</p>
+    <p class="lead" style="margin-bottom:0">Under varje bild står var sidan kom ifrån i originalet (V = vänster halva, H = höger halva).
+    Klicka på krysset uppe till höger för att ta bort en sida, till exempel en tom sida. Klicka igen för att ångra. Filerna uppdateras automatiskt.</p>
     <div class="thumbs" id="thumbs"></div>
     <div class="actions">
       <button class="secondary" id="more" hidden>Visa fler sidor</button>
@@ -254,8 +289,16 @@
 
   let sourceBytes = null;   // ArrayBuffer of the loaded PDF
   let sourceName = '';
+  let srcPdf = null;        // pdf.js document of the source, for previews
+  let thumbCache = new Map(); // srcIndex -> { full?, left?, right? } canvases
   let objectUrls = [];      // blob URLs of the results
-  let preview = null;       // { docs: [{ name, pdf, provenance }], queue, pos }
+  // Result of the last run: { src (pdf-lib doc), chunks: [[entry]], perFile, stats, warn }
+  // entry: { srcIndex, half: 'left' | 'right' | null, box, removed, el, btn }
+  let state = null;
+  let preview = null;       // { queue: [{ c, i }], pos, multi }
+  let rebuildTimer = null;
+  let rebuilding = false;
+  let rebuildPending = false;
 
   if (window.pdfjsLib) {
     // Works from file:// too: if the real worker cannot start, pdf.js
@@ -271,9 +314,13 @@
   function log(text) {
     els.log.textContent += (els.log.textContent ? '\n' : '') + text;
   }
-  function clearResult() {
+  function revokeUrls() {
     objectUrls.forEach((u) => URL.revokeObjectURL(u));
     objectUrls = [];
+  }
+  function clearResult() {
+    clearTimeout(rebuildTimer);
+    revokeUrls();
     els.download.hidden = true;
     els.download.removeAttribute('href');
     els.fileList.hidden = true;
@@ -283,7 +330,7 @@
     els.thumbs.innerHTML = '';
     els.more.hidden = true;
     els.log.textContent = '';
-    if (preview) preview.docs.forEach((d) => d.pdf.destroy());
+    state = null;
     preview = null;
   }
   function makeUrl(bytes, type) {
@@ -303,6 +350,8 @@
       return;
     }
     clearResult();
+    if (srcPdf) { srcPdf.destroy(); srcPdf = null; }
+    thumbCache = new Map();
     sourceBytes = await file.arrayBuffer();
     sourceName = file.name;
     els.filename.innerHTML = 'Vald fil: <b></b> (' + formatSize(file.size) + ')';
@@ -340,7 +389,7 @@
   }
   function parseOrder(text) {
     const parts = text.split(/[\s,;]+/).filter(Boolean);
-    if (parts.length === 0) throw new Error('Ange en ordning, till exempel 4,1,2,3.');
+    if (parts.length === 0) throw new Error('Ange en ordning, till exempel 2,3,4,1.');
     const nums = parts.map((p) => {
       const n = Number(p);
       if (!Number.isInteger(n) || n < 1) throw new Error('"' + p + '" är inte ett giltigt sidnummer.');
@@ -396,7 +445,7 @@
   }
 
   // ---------- Core processing ----------
-  // Builds one output PDF from a list of plan entries { srcIndex, box }.
+  // Builds one output PDF from a list of entries { srcIndex, box }.
   async function buildDoc(src, entries, title) {
     const { PDFDocument } = PDFLib;
     const out = await PDFDocument.create();
@@ -410,6 +459,7 @@
     return out.save();
   }
 
+  // Reads the settings, splits and sorts the pages and stores the plan in `state`.
   async function process() {
     const { PDFDocument } = PDFLib;
     const order = parseOrder(els.order.value);
@@ -421,19 +471,18 @@
     const srcPages = src.getPages();
 
     // Plan: one entry per output page before sorting.
-    // Each entry: { srcIndex, half: 'left' | 'right' | null, box }
     const plan = [];
     let splitCount = 0, keptCount = 0;
     srcPages.forEach((page, i) => {
       const geo = halfBoxes(page);
       if (onlyLandscape && !geo.landscape) {
-        plan.push({ srcIndex: i, half: null, box: null });
+        plan.push({ srcIndex: i, half: null, box: null, removed: false });
         keptCount++;
       } else {
         const first = swap ? 'right' : 'left';
         const second = swap ? 'left' : 'right';
-        plan.push({ srcIndex: i, half: first, box: geo[first] });
-        plan.push({ srcIndex: i, half: second, box: geo[second] });
+        plan.push({ srcIndex: i, half: first, box: geo[first], removed: false });
+        plan.push({ srcIndex: i, half: second, box: geo[second], removed: false });
         splitCount++;
       }
     });
@@ -457,28 +506,76 @@
       for (let k = 0; k < sorted.length; k += perFile) chunks.push(sorted.slice(k, k + perFile));
     }
 
-    const files = [];
-    const pad = String(chunks.length).length;
-    for (let c = 0; c < chunks.length; c++) {
-      const single = perFile === 0;
-      const name = single
-        ? baseName() + '-sorterad.pdf'
-        : baseName() + '-hafte-' + String(c + 1).padStart(pad, '0') + '.pdf';
-      const title = single ? baseName() + ' (sorterad)' : baseName() + ' häfte ' + (c + 1);
-      setStatus('Bearbetar fil ' + (c + 1) + ' av ' + chunks.length + '…', '');
-      const bytes = await buildDoc(src, chunks[c], title);
-      files.push({ name, bytes, provenance: chunks[c].map((e) => ({ srcIndex: e.srcIndex, half: e.half })) });
-    }
-
     const lastShort = perFile > 0 && chunks.length > 0 && chunks[chunks.length - 1].length < perFile;
-    return {
-      files,
+    state = {
+      src, chunks, perFile, warn: false,
       stats: {
         srcCount: srcPages.length, splitCount, keptCount, outCount: sorted.length,
         remainder: remainder.length, groupSize: n, perFile, lastShort,
         lastSize: chunks.length ? chunks[chunks.length - 1].length : 0,
+        fileCount: chunks.length,
       },
     };
+  }
+
+  function fileName(c) {
+    if (state.perFile === 0) return baseName() + '-sorterad.pdf';
+    const pad = String(state.chunks.length).length;
+    return baseName() + '-hafte-' + String(c + 1).padStart(pad, '0') + '.pdf';
+  }
+
+  // Builds the output files from `state`, skipping removed pages.
+  async function buildFiles() {
+    const files = [];
+    for (let c = 0; c < state.chunks.length; c++) {
+      const entries = state.chunks[c].filter((e) => !e.removed);
+      if (entries.length === 0) continue;
+      const title = state.perFile === 0 ? baseName() + ' (sorterad)' : baseName() + ' häfte ' + (c + 1);
+      setStatus('Bearbetar fil ' + (c + 1) + ' av ' + state.chunks.length + '…', '');
+      const bytes = await buildDoc(state.src, entries, title);
+      files.push({ name: fileName(c), bytes });
+    }
+    if (files.length === 0) throw new Error('Alla sidor är borttagna. Det finns inget att ladda ner.');
+    return files;
+  }
+
+  // Updates the download button and the file list.
+  function publishFiles(files) {
+    revokeUrls();
+    els.fileListItems.innerHTML = '';
+    if (files.length === 1) {
+      const f = files[0];
+      els.download.href = makeUrl(f.bytes, 'application/pdf');
+      els.download.download = f.name;
+      els.download.textContent = 'Ladda ner resultatet';
+      els.fileList.hidden = true;
+    } else {
+      const zipBytes = makeZip(files.map((f) => ({ name: f.name, data: f.bytes })));
+      els.download.href = makeUrl(zipBytes, 'application/zip');
+      els.download.download = baseName() + '-haften.zip';
+      els.download.textContent = 'Ladda ner alla som zip (' + files.length + ' filer)';
+      files.forEach((f) => {
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.href = makeUrl(f.bytes, 'application/pdf');
+        a.download = f.name;
+        a.textContent = f.name;
+        li.appendChild(a);
+        els.fileListItems.appendChild(li);
+      });
+      els.fileList.hidden = false;
+    }
+    els.download.hidden = false;
+  }
+
+  function removedCount() {
+    return state.chunks.reduce((s, chunk) => s + chunk.filter((e) => e.removed).length, 0);
+  }
+  function doneStatus() {
+    const removed = removedCount();
+    let text = state.warn ? 'Klart, med anmärkning.' : 'Klart!';
+    if (removed > 0) text += ' ' + removed + (removed === 1 ? ' sida borttagen.' : ' sidor borttagna.');
+    setStatus(text, state.warn ? 'warn' : 'ok');
   }
 
   els.run.addEventListener('click', async () => {
@@ -487,49 +584,26 @@
     els.run.disabled = true;
     setStatus('Bearbetar…', '');
     try {
-      const result = await process();
-      const s = result.stats;
-      let warn = false;
+      await process();
+      const s = state.stats;
       log('Original: ' + s.srcCount + ' sidor. Delade: ' + s.splitCount + '. Behållna hela: ' + s.keptCount + '.');
       log('Resultat: ' + s.outCount + ' sidor, sorterade i grupper om ' + s.groupSize + '.');
       if (s.remainder > 0) {
-        warn = true;
+        state.warn = true;
         log('Obs: de sista ' + s.remainder + ' sidorna bildar ingen hel grupp och lämnades i ursprunglig ordning.');
       }
       if (s.perFile > 0) {
-        log(result.files.length === 1
+        log(s.fileCount === 1
           ? 'Allt rymdes i en fil (högst ' + s.perFile + ' sidor per fil).'
-          : 'Uppdelat i ' + result.files.length + ' filer med ' + s.perFile + ' sidor i varje.');
+          : 'Uppdelat i ' + s.fileCount + ' filer med ' + s.perFile + ' sidor i varje.');
         if (s.lastShort) {
-          warn = true;
+          state.warn = true;
           log('Obs: den sista filen fick bara ' + s.lastSize + ' sidor.');
         }
       }
-
-      if (result.files.length === 1) {
-        const f = result.files[0];
-        els.download.href = makeUrl(f.bytes, 'application/pdf');
-        els.download.download = f.name;
-        els.download.textContent = 'Ladda ner resultatet';
-      } else {
-        const zipBytes = makeZip(result.files.map((f) => ({ name: f.name, data: f.bytes })));
-        els.download.href = makeUrl(zipBytes, 'application/zip');
-        els.download.download = baseName() + '-haften.zip';
-        els.download.textContent = 'Ladda ner alla som zip (' + result.files.length + ' filer)';
-        result.files.forEach((f) => {
-          const li = document.createElement('li');
-          const a = document.createElement('a');
-          a.href = makeUrl(f.bytes, 'application/pdf');
-          a.download = f.name;
-          a.textContent = f.name;
-          li.appendChild(a);
-          els.fileListItems.appendChild(li);
-        });
-        els.fileList.hidden = false;
-      }
-      els.download.hidden = false;
-      setStatus(warn ? 'Klart, med anmärkning.' : 'Klart!', warn ? 'warn' : 'ok');
-      await showPreview(result.files);
+      publishFiles(await buildFiles());
+      doneStatus();
+      await showPreview();
     } catch (err) {
       console.error(err);
       setStatus('Det gick inte: ' + (err && err.message ? err.message : err), 'err');
@@ -537,6 +611,42 @@
       els.run.disabled = false;
     }
   });
+
+  // ---------- Removing pages ----------
+  function toggleRemoved(entry) {
+    entry.removed = !entry.removed;
+    entry.el.classList.toggle('removed', entry.removed);
+    entry.btn.textContent = entry.removed ? '↶' : '✕';
+    entry.btn.title = entry.removed ? 'Ångra borttagning' : 'Ta bort sidan';
+    entry.btn.setAttribute('aria-label', entry.btn.title);
+    entry.btn.setAttribute('aria-pressed', entry.removed ? 'true' : 'false');
+    scheduleRebuild();
+  }
+  function scheduleRebuild() {
+    clearTimeout(rebuildTimer);
+    rebuildTimer = setTimeout(rebuild, 400);
+  }
+  async function rebuild() {
+    if (!state) return;
+    if (rebuilding) { rebuildPending = true; return; }
+    rebuilding = true;
+    els.run.disabled = true;
+    setStatus('Uppdaterar filerna…', '');
+    try {
+      publishFiles(await buildFiles());
+      doneStatus();
+    } catch (err) {
+      console.error(err);
+      revokeUrls();
+      els.download.hidden = true;
+      els.fileList.hidden = true;
+      setStatus(err && err.message ? err.message : String(err), 'err');
+    } finally {
+      rebuilding = false;
+      els.run.disabled = false;
+      if (rebuildPending) { rebuildPending = false; rebuild(); }
+    }
+  }
 
   // ---------- Minimal ZIP writer (store only, no compression) ----------
   const CRC_TABLE = (() => {
@@ -622,57 +732,93 @@
   }
 
   // ---------- Preview ----------
+  // Thumbnails are rendered from the source PDF with pdf.js (which shows
+  // pages the way a viewer does, rotation included) and cropped to the
+  // half that each output page uses.
   const PREVIEW_BATCH = 16;
-  async function showPreview(files) {
-    if (!window.pdfjsLib) return;
+  const THUMB_WIDTH = 240;
+
+  async function showPreview() {
+    if (!window.pdfjsLib || !state) return;
     els.previewPanel.hidden = false;
     try {
-      const docs = [];
+      if (!srcPdf) srcPdf = await pdfjsLib.getDocument({ data: sourceBytes.slice(0) }).promise;
       const queue = [];
-      for (let f = 0; f < files.length; f++) {
-        const pdf = await pdfjsLib.getDocument({ data: files[f].bytes.slice(0) }).promise;
-        docs.push({ name: files[f].name, pdf, provenance: files[f].provenance });
-        for (let p = 1; p <= pdf.numPages; p++) queue.push({ f, p });
-      }
-      preview = { docs, queue, pos: 0, multi: files.length > 1 };
+      state.chunks.forEach((chunk, c) => chunk.forEach((entry, i) => queue.push({ c, i })));
+      preview = { queue, pos: 0, multi: state.chunks.length > 1 };
       await renderMore();
     } catch (err) {
       console.error(err);
       log('Förhandsgranskningen kunde inte visas (' + err.message + '), men filerna går ändå att ladda ner.');
     }
   }
+
+  function cropCanvas(src, x, w) {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = src.height;
+    c.getContext('2d').drawImage(src, x, 0, w, src.height, 0, 0, w, src.height);
+    return c;
+  }
+  async function thumbFor(entry) {
+    let cached = thumbCache.get(entry.srcIndex);
+    if (!cached) { cached = {}; thumbCache.set(entry.srcIndex, cached); }
+    const key = entry.half || 'full';
+    if (cached[key]) return cached[key];
+
+    const page = await srcPdf.getPage(entry.srcIndex + 1);
+    const base = page.getViewport({ scale: 1 });
+    const width = entry.half ? THUMB_WIDTH * 2 : THUMB_WIDTH;
+    const viewport = page.getViewport({ scale: width / base.width });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    page.cleanup();
+
+    if (entry.half) {
+      const halfW = Math.floor(canvas.width / 2);
+      cached.left = cropCanvas(canvas, 0, halfW);
+      cached.right = cropCanvas(canvas, halfW, canvas.width - halfW);
+    } else {
+      cached.full = canvas;
+    }
+    return cached[key];
+  }
+
   async function renderMore() {
     if (!preview) return;
-    const { docs, queue } = preview;
+    const { queue } = preview;
     const end = Math.min(queue.length, preview.pos + PREVIEW_BATCH);
     els.more.hidden = true;
     for (let q = preview.pos; q < end; q++) {
-      const { f, p } = queue[q];
-      const doc = docs[f];
-      if (preview.multi && p === 1) {
+      const { c, i } = queue[q];
+      const entry = state.chunks[c][i];
+      if (preview.multi && i === 0) {
         const h = document.createElement('h3');
-        h.textContent = doc.name;
+        h.textContent = fileName(c);
         els.thumbs.appendChild(h);
       }
-      const page = await doc.pdf.getPage(p);
-      const base = page.getViewport({ scale: 1 });
-      const scale = 240 / base.width;
-      const viewport = page.getViewport({ scale });
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.ceil(viewport.width);
-      canvas.height = Math.ceil(viewport.height);
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      const canvas = await thumbFor(entry);
 
-      const info = doc.provenance[p - 1];
       const div = document.createElement('div');
-      div.className = 'thumb';
+      div.className = 'thumb' + (entry.removed ? ' removed' : '');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'remove';
+      btn.textContent = entry.removed ? '↶' : '✕';
+      btn.title = entry.removed ? 'Ångra borttagning' : 'Ta bort sidan';
+      btn.setAttribute('aria-label', btn.title);
+      btn.setAttribute('aria-pressed', entry.removed ? 'true' : 'false');
+      btn.addEventListener('click', () => toggleRemoved(entry));
       const label = document.createElement('b');
-      label.textContent = (preview.multi ? 'Sida ' : 'Ny sida ') + p;
+      label.textContent = (preview.multi ? 'Sida ' : 'Ny sida ') + (i + 1);
       const origin = document.createElement('span');
-      origin.textContent = 'från sida ' + (info.srcIndex + 1) + (info.half ? (info.half === 'left' ? ' V' : ' H') : '');
-      div.append(canvas, label, origin);
+      origin.textContent = 'från sida ' + (entry.srcIndex + 1) + (entry.half ? (entry.half === 'left' ? ' V' : ' H') : '');
+      div.append(canvas, btn, label, origin);
+      entry.el = div;
+      entry.btn = btn;
       els.thumbs.appendChild(div);
-      page.cleanup();
     }
     preview.pos = end;
     els.more.hidden = end >= queue.length;

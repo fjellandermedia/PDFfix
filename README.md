@@ -18,8 +18,11 @@ Allt sker i webbläsaren. Ingen fil skickas någonstans och ingen webbserver beh
      Filerna heter `<original>-hafte-1.pdf`, `<original>-hafte-2.pdf` och så vidare.
    - **Dela bara liggande sidor**: stående sidor i filen lämnas hela.
    - **Byt plats på vänster och höger halva**: prova om sidorna hamnar parvis fel.
-4. Klicka på **Dela och sortera**, titta på förhandsgranskningen och klicka på **Ladda ner resultatet**
-   (eller **Ladda ner alla som zip** om du valt uppdelning per häfte).
+4. Klicka på **Dela och sortera** och titta på förhandsgranskningen.
+5. Ta bort sidor du inte vill ha med, till exempel tomma sidor, genom att klicka på krysset uppe till höger
+   på sidan. Klicka igen för att ångra. Filerna byggs om automatiskt, och en borttagen sida påverkar bara
+   det häfte den hör till.
+6. Klicka på **Ladda ner resultatet** (eller **Ladda ner alla som zip** om du valt uppdelning per häfte).
 
 Delningen görs utan att bilderna packas om, så kvaliteten blir densamma som i originalet.
 
@@ -39,6 +42,6 @@ Fungerar i Chrome, Edge, Firefox och Safari utan internetanslutning.
 ## Teknik
 
 - [pdf-lib](https://pdf-lib.js.org/) klipper sidorna (via sidrutor, utan omkodning) och bygger den nya pdf-filen.
-- [pdf.js](https://mozilla.github.io/pdf.js/) ritar förhandsgranskningen.
+- [pdf.js](https://mozilla.github.io/pdf.js/) ritar förhandsgranskningen direkt från originalfilen.
 - Zip-filen skapas av en liten inbyggd zip-skrivare utan komprimering (pdf-filer är redan komprimerade).
 - Båda biblioteken ligger i `vendor/` så att sidan fungerar utan nätverk. Licenser finns i samma mapp.
