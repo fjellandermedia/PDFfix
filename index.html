@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skrivhäftesfix</title>
+<meta name="description" content="Delar skannade A3-skrivhäften i A4-sidor och sorterar om dem i läsordning. Allt sker lokalt i webbläsaren.">
+<style>
+  :root {
+    --bg: #f6f5f1;
+    --panel: #ffffff;
+    --text: #1d1d1b;
+    --muted: #6b6a66;
+    --line: #dcdad3;
+    --accent: #1f5f8b;
+    --accent-text: #ffffff;
+    --ok: #2d7a3e;
+    --warn: #a15c00;
+    --err: #b3261e;
+    --drop: #eef3f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17181a;
+      --panel: #202225;
+      --text: #ecebe6;
+      --muted: #a3a29c;
+      --line: #3a3c40;
+      --accent: #6aa9d8;
+      --accent-text: #0e1116;
+      --ok: #7ccd8c;
+      --warn: #e5a94a;
+      --err: #f28b82;
+      --drop: #24303a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17181a;
+    --panel: #202225;
+    --text: #ecebe6;
+    --muted: #a3a29c;
+    --line: #3a3c40;
+    --accent: #6aa9d8;
+    --accent-text: #0e1116;
+    --ok: #7ccd8c;
+    --warn: #e5a94a;
+    --err: #f28b82;
+    --drop: #24303a;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 24px 16px 64px;
+  }
+  main { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 0 0 12px; }
+  p.lead { color: var(--muted); margin: 0 0 24px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .drop {
+    display: block;
+    border: 2px dashed var(--line);
+    border-radius: 10px;
+    padding: 28px 16px;
+    text-align: center;
+    cursor: pointer;
+    background: var(--drop);
+    transition: border-color .15s;
+  }
+  .drop.over, .drop:hover { border-color: var(--accent); }
+  .drop input { display: none; }
+  .drop strong { display: block; margin-bottom: 4px; }
+  .drop span { color: var(--muted); font-size: .95rem; }
+  .filename { margin-top: 12px; font-size: .95rem; }
+  .filename b { font-weight: 600; }
+  .grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  @media (min-width: 640px) { .grid { grid-template-columns: 1fr 1fr; } }
+  label.field { display: block; }
+  label.field > span { display: block; font-weight: 600; margin-bottom: 4px; }
+  label.field small { display: block; color: var(--muted); font-weight: 400; margin-top: 4px; }
+  select, input[type="text"] {
+    width: 100%;
+    font: inherit;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+  }
+  label.check { display: flex; gap: 10px; align-items: flex-start; }
+  label.check input { margin-top: 5px; }
+  label.check small { display: block; color: var(--muted); }
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 18px; }
+  button, a.button {
+    font: inherit;
+    font-weight: 600;
+    padding: 10px 18px;
+    border-radius: 8px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: var(--accent-text);
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+  }
+  button.secondary {
+    background: transparent;
+    color: var(--accent);
+  }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .status { font-size: .95rem; }
+  .status.ok { color: var(--ok); }
+  .status.warn { color: var(--warn); }
+  .status.err { color: var(--err); }
+  .log { font-size: .9rem; color: var(--muted); margin-top: 8px; white-space: pre-wrap; }
+  .thumbs {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 14px;
+    margin-top: 12px;
+  }
+  .thumb { text-align: center; font-size: .8rem; color: var(--muted); }
+  .thumb canvas {
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--line);
+    background: #fff;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .thumb b { color: var(--text); display: block; }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--accent); }
+  code { font-size: .9em; }
+  footer { color: var(--muted); font-size: .85rem; margin-top: 32px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Skrivhäftesfix</h1>
+  <p class="lead">Delar skannade A3-skrivhäften (liggande) i stående A4-sidor och sorterar om dem i läsordning.
+  Filen lämnar aldrig din dator: allt sker i webbläsaren.</p>
+
+  <section class="panel">
+    <h2>1. Välj pdf-fil</h2>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept="application/pdf,.pdf">
+      <strong>Klicka här eller släpp en pdf-fil</strong>
+      <span>Skannade skrivhäften, en liggande A3-sida per uppslag</span>
+    </label>
+    <div class="filename" id="filename"></div>
+  </section>
+
+  <section class="panel">
+    <h2>2. Inställningar</h2>
+    <div class="grid">
+      <label class="field">
+        <span>Ny ordning per häfte</span>
+        <select id="preset">
+          <option value="4,1,2,3">4, 1, 2, 3</option>
+          <option value="2,3,4,1">2, 3, 4, 1 (utsidan skannad först)</option>
+          <option value="1,2,3,4">Ingen omsortering</option>
+          <option value="custom">Egen ordning…</option>
+        </select>
+        <small>Gäller varje grupp av fyra delade sidor.</small>
+      </label>
+      <label class="field">
+        <span>Egen ordning</span>
+        <input type="text" id="order" value="4,1,2,3" spellcheck="false">
+        <small><code>4,1,2,3</code> betyder: ny sida 1 = gammal sida 4, ny sida 2 = gammal sida 1, ny sida 3 = gammal sida 2, ny sida 4 = gammal sida 3. Antalet tal bestämmer gruppstorleken.</small>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="onlyLandscape" checked>
+        <span>Dela bara liggande sidor<small>Stående sidor i filen behålls hela och räknas som en sida.</small></span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="swap">
+        <span>Byt plats på vänster och höger halva<small>Prova om sidorna hamnar parvis fel.</small></span>
+      </label>
+    </div>
+    <div class="actions">
+      <button id="run" disabled>Dela och sortera</button>
+      <a class="button" id="download" hidden download>Ladda ner resultatet</a>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="log" id="log"></div>
+  </section>
+
+  <section class="panel" id="previewPanel" hidden>
+    <h2>3. Förhandsgranskning av resultatet</h2>
+    <p class="lead" style="margin-bottom:0">Under varje bild står var sidan kom ifrån i originalet (V = vänster halva, H = höger halva).</p>
+    <div class="thumbs" id="thumbs"></div>
+    <div class="actions">
+      <button class="secondary" id="more" hidden>Visa fler sidor</button>
+    </div>
+  </section>
+
+  <footer>
+    Bygger på <a href="https://pdf-lib.js.org/">pdf-lib</a> och <a href="https://mozilla.github.io/pdf.js/">pdf.js</a>.
+    Öppna sidan direkt från hårddisken eller via GitHub Pages. Ingen server behövs.
+  </footer>
+</main>
+
+<script src="vendor/pdf-lib.min.js"></script>
+<script src="vendor/pdf.min.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    drop: $('drop'), file: $('file'), filename: $('filename'),
+    preset: $('preset'), order: $('order'), onlyLandscape: $('onlyLandscape'), swap: $('swap'),
+    run: $('run'), download: $('download'), status: $('status'), log: $('log'),
+    previewPanel: $('previewPanel'), thumbs: $('thumbs'), more: $('more'),
+  };
+
+  let sourceBytes = null;   // ArrayBuffer of the loaded PDF
+  let sourceName = '';
+  let resultUrl = null;     // blob URL of the result
+  let preview = null;       // { pdf, pages: [provenance], rendered }
+
+  if (window.pdfjsLib) {
+    // Works from file:// too: if the real worker cannot start, pdf.js
+    // falls back to running the worker code on the main thread.
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+  }
+
+  // ---------- UI helpers ----------
+  function setStatus(text, kind) {
+    els.status.textContent = text;
+    els.status.className = 'status' + (kind ? ' ' + kind : '');
+  }
+  function log(text) {
+    els.log.textContent += (els.log.textContent ? '\n' : '') + text;
+  }
+  function clearResult() {
+    if (resultUrl) { URL.revokeObjectURL(resultUrl); resultUrl = null; }
+    els.download.hidden = true;
+    els.download.removeAttribute('href');
+    els.previewPanel.hidden = true;
+    els.thumbs.innerHTML = '';
+    els.more.hidden = true;
+    els.log.textContent = '';
+    if (preview && preview.pdf) { preview.pdf.destroy(); }
+    preview = null;
+  }
+
+  // ---------- File handling ----------
+  async function loadFile(file) {
+    if (!file) return;
+    if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
+      setStatus('Välj en pdf-fil.', 'err');
+      return;
+    }
+    clearResult();
+    sourceBytes = await file.arrayBuffer();
+    sourceName = file.name;
+    els.filename.innerHTML = 'Vald fil: <b></b> (' + formatSize(file.size) + ')';
+    els.filename.querySelector('b').textContent = file.name;
+    els.run.disabled = false;
+    setStatus('Klar att bearbeta.', '');
+  }
+  function formatSize(bytes) {
+    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' kB';
+    return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+  }
+
+  els.file.addEventListener('change', () => loadFile(els.file.files[0]));
+  ['dragenter', 'dragover'].forEach((ev) => els.drop.addEventListener(ev, (e) => {
+    e.preventDefault(); els.drop.classList.add('over');
+  }));
+  ['dragleave', 'drop'].forEach((ev) => els.drop.addEventListener(ev, (e) => {
+    e.preventDefault(); els.drop.classList.remove('over');
+  }));
+  els.drop.addEventListener('drop', (e) => {
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    loadFile(file);
+  });
+
+  // ---------- Order settings ----------
+  els.preset.addEventListener('change', () => {
+    if (els.preset.value !== 'custom') els.order.value = els.preset.value;
+  });
+  els.order.addEventListener('input', () => {
+    const match = Array.from(els.preset.options).find((o) => o.value === normalizeOrderText(els.order.value));
+    els.preset.value = match ? match.value : 'custom';
+  });
+  function normalizeOrderText(text) {
+    return text.split(/[\s,;]+/).filter(Boolean).join(',');
+  }
+  function parseOrder(text) {
+    const parts = text.split(/[\s,;]+/).filter(Boolean);
+    if (parts.length === 0) throw new Error('Ange en ordning, till exempel 4,1,2,3.');
+    const nums = parts.map((p) => {
+      const n = Number(p);
+      if (!Number.isInteger(n) || n < 1) throw new Error('"' + p + '" är inte ett giltigt sidnummer.');
+      return n;
+    });
+    const n = nums.length;
+    const seen = new Set(nums);
+    if (seen.size !== n || nums.some((v) => v > n)) {
+      throw new Error('Ordningen måste innehålla varje tal 1 till ' + n + ' exakt en gång.');
+    }
+    return nums;
+  }
+
+  // ---------- Geometry ----------
+  // Returns the visually left and right halves of a page as boxes in the
+  // page's own (unrotated) coordinate system, taking /Rotate into account.
+  function halfBoxes(page) {
+    const mb = page.getMediaBox();
+    const { x, y, width: w, height: h } = mb;
+    let rot = page.getRotation().angle % 360;
+    if (rot < 0) rot += 360;
+    const halfW = w / 2, halfH = h / 2;
+    switch (rot) {
+      case 90:   // displayed left edge is the original bottom edge
+        return { left: { x, y, width: w, height: halfH }, right: { x, y: y + halfH, width: w, height: halfH }, landscape: h > w };
+      case 180:  // displayed left edge is the original right edge
+        return { left: { x: x + halfW, y, width: halfW, height: h }, right: { x, y, width: halfW, height: h }, landscape: w > h };
+      case 270:  // displayed left edge is the original top edge
+        return { left: { x, y: y + halfH, width: w, height: halfH }, right: { x, y, width: w, height: halfH }, landscape: h > w };
+      default:
+        return { left: { x, y, width: halfW, height: h }, right: { x: x + halfW, y, width: halfW, height: h }, landscape: w > h };
+    }
+  }
+  function applyBox(page, box) {
+    const args = [box.x, box.y, box.width, box.height];
+    page.setMediaBox(...args);
+    page.setCropBox(...args);
+    page.setBleedBox(...args);
+    page.setTrimBox(...args);
+    page.setArtBox(...args);
+  }
+
+  // ---------- Core processing ----------
+  async function process() {
+    const { PDFDocument } = PDFLib;
+    const order = parseOrder(els.order.value);
+    const onlyLandscape = els.onlyLandscape.checked;
+    const swap = els.swap.checked;
+
+    const src = await PDFDocument.load(sourceBytes, { ignoreEncryption: true });
+    const srcPages = src.getPages();
+    const out = await PDFDocument.create();
+
+    // Plan: one entry per output page before sorting.
+    // Each entry: { srcIndex, half: 'left' | 'right' | null }
+    const plan = [];
+    const copyIndices = [];
+    let splitCount = 0, keptCount = 0;
+    srcPages.forEach((page, i) => {
+      const geo = halfBoxes(page);
+      if (onlyLandscape && !geo.landscape) {
+        plan.push({ srcIndex: i, half: null, box: null });
+        copyIndices.push(i);
+        keptCount++;
+      } else {
+        const first = swap ? 'right' : 'left';
+        const second = swap ? 'left' : 'right';
+        plan.push({ srcIndex: i, half: first, box: geo[first] });
+        plan.push({ srcIndex: i, half: second, box: geo[second] });
+        copyIndices.push(i, i);
+        splitCount++;
+      }
+    });
+
+    const copied = await out.copyPages(src, copyIndices);
+    copied.forEach((page, k) => {
+      if (plan[k].box) applyBox(page, plan[k].box);
+      plan[k].page = page;
+    });
+
+    // Reorder in groups of order.length
+    const n = order.length;
+    const sorted = [];
+    let i = 0;
+    for (; i + n <= plan.length; i += n) {
+      const group = plan.slice(i, i + n);
+      for (const pos of order) sorted.push(group[pos - 1]);
+    }
+    const remainder = plan.slice(i);
+    sorted.push(...remainder);
+
+    sorted.forEach((entry) => out.addPage(entry.page));
+    out.setTitle((sourceName || 'skrivhäften').replace(/\.pdf$/i, '') + ' (sorterad)');
+    out.setProducer('Skrivhäftesfix');
+
+    const bytes = await out.save();
+    return {
+      bytes,
+      provenance: sorted.map((e) => ({ srcIndex: e.srcIndex, half: e.half })),
+      stats: { srcCount: srcPages.length, splitCount, keptCount, outCount: sorted.length, remainder: remainder.length, groupSize: n },
+    };
+  }
+
+  els.run.addEventListener('click', async () => {
+    if (!sourceBytes) return;
+    clearResult();
+    els.run.disabled = true;
+    setStatus('Bearbetar…', '');
+    try {
+      const result = await process();
+      const s = result.stats;
+      log('Original: ' + s.srcCount + ' sidor. Delade: ' + s.splitCount + '. Behållna hela: ' + s.keptCount + '.');
+      log('Resultat: ' + s.outCount + ' sidor, sorterade i grupper om ' + s.groupSize + '.');
+      if (s.remainder > 0) {
+        log('Obs: de sista ' + s.remainder + ' sidorna bildar ingen hel grupp och lämnades i ursprunglig ordning.');
+      }
+      const blob = new Blob([result.bytes], { type: 'application/pdf' });
+      resultUrl = URL.createObjectURL(blob);
+      els.download.href = resultUrl;
+      els.download.download = (sourceName || 'skrivhaften').replace(/\.pdf$/i, '') + '-sorterad.pdf';
+      els.download.hidden = false;
+      setStatus(s.remainder > 0 ? 'Klart, med anmärkning.' : 'Klart!', s.remainder > 0 ? 'warn' : 'ok');
+      await showPreview(result.bytes, result.provenance);
+    } catch (err) {
+      console.error(err);
+      setStatus('Det gick inte: ' + (err && err.message ? err.message : err), 'err');
+    } finally {
+      els.run.disabled = false;
+    }
+  });
+
+  // ---------- Preview ----------
+  const PREVIEW_BATCH = 16;
+  async function showPreview(bytes, provenance) {
+    if (!window.pdfjsLib) return;
+    els.previewPanel.hidden = false;
+    try {
+      const pdf = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+      preview = { pdf, provenance, rendered: 0 };
+      await renderMore();
+    } catch (err) {
+      console.error(err);
+      log('Förhandsgranskningen kunde inte visas (' + err.message + '), men filen går ändå att ladda ner.');
+    }
+  }
+  async function renderMore() {
+    if (!preview) return;
+    const { pdf, provenance } = preview;
+    const end = Math.min(pdf.numPages, preview.rendered + PREVIEW_BATCH);
+    els.more.hidden = true;
+    for (let p = preview.rendered + 1; p <= end; p++) {
+      const page = await pdf.getPage(p);
+      const base = page.getViewport({ scale: 1 });
+      const scale = 240 / base.width;
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+      const info = provenance[p - 1];
+      const div = document.createElement('div');
+      div.className = 'thumb';
+      const label = document.createElement('b');
+      label.textContent = 'Ny sida ' + p;
+      const origin = document.createElement('span');
+      origin.textContent = 'från sida ' + (info.srcIndex + 1) + (info.half ? (info.half === 'left' ? ' V' : ' H') : '');
+      div.append(canvas, label, origin);
+      els.thumbs.appendChild(div);
+      page.cleanup();
+    }
+    preview.rendered = end;
+    els.more.hidden = end >= pdf.numPages;
+    els.more.textContent = 'Visa fler sidor (' + (pdf.numPages - end) + ' kvar)';
+  }
+  els.more.addEventListener('click', renderMore);
+})();
+</script>
+</body>
+</html>
