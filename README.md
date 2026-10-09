@@ -8,9 +8,10 @@ Allt sker i webbläsaren. Ingen fil skickas någonstans och ingen webbserver beh
 1. Öppna `index.html` (se nedan).
 2. Välj eller släpp en pdf-fil med skannade skrivhäften (en liggande A3-sida per uppslag).
 3. Kontrollera inställningarna:
-   - **Ny ordning per häfte**: standard är `4,1,2,3`, det vill säga ny sida 1 = gammal sida 4,
-     ny sida 2 = gammal sida 1, ny sida 3 = gammal sida 2, ny sida 4 = gammal sida 3.
-     Välj `2,3,4,1` om utsidan av häftet skannades först. Du kan också skriva en egen ordning,
+   - **Ny ordning per häfte**: standard är `2,3,4,1`, det vill säga ny sida 1 = gammal sida 2,
+     ny sida 2 = gammal sida 3, ny sida 3 = gammal sida 4, ny sida 4 = gammal sida 1. Det passar när
+     utsidan av häftet skannades först (uppslagen kommer då som 4|1 och 2|3).
+     Välj `4,1,2,3` om insidan skannades först. Du kan också skriva en egen ordning,
      till exempel `2,3,6,7,8,5,4,1` för häften med två ark (åtta sidor). Antalet tal avgör gruppstorleken.
    - **Uppdelning i filer**: välj *En fil per häfte (4 sidor)* eller *(8 sidor)*, eller ett eget antal sidor per fil,
      för att få en pdf per häfte. Du får då en zip-fil med alla häften samt länkar till varje enskild fil.

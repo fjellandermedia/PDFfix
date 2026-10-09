@@ -175,8 +175,8 @@
       <label class="field">
         <span>Ny ordning per häfte</span>
         <select id="preset">
-          <option value="4,1,2,3">4, 1, 2, 3</option>
           <option value="2,3,4,1">2, 3, 4, 1 (utsidan skannad först)</option>
+          <option value="4,1,2,3">4, 1, 2, 3 (insidan skannad först)</option>
           <option value="1,2,3,4">Ingen omsortering</option>
           <option value="custom">Egen ordning…</option>
         </select>
@@ -184,8 +184,8 @@
       </label>
       <label class="field">
         <span>Egen ordning</span>
-        <input type="text" id="order" value="4,1,2,3" spellcheck="false">
-        <small><code>4,1,2,3</code> betyder: ny sida 1 = gammal sida 4, ny sida 2 = gammal sida 1, ny sida 3 = gammal sida 2, ny sida 4 = gammal sida 3. Antalet tal bestämmer gruppstorleken.</small>
+        <input type="text" id="order" value="2,3,4,1" spellcheck="false">
+        <small><code>2,3,4,1</code> betyder: ny sida 1 = gammal sida 2, ny sida 2 = gammal sida 3, ny sida 3 = gammal sida 4, ny sida 4 = gammal sida 1. Antalet tal bestämmer gruppstorleken.</small>
       </label>
       <label class="field">
         <span>Uppdelning i filer</span>
