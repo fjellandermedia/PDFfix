@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDFfix: Kombinera provdelar</title>
+<meta name="description" content="Sätter ihop varje elevs provdelar från två pdf-filer till en pdf per elev. Allt sker lokalt i webbläsaren.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header class="site">
+    <h1>PDFfix</h1>
+    <nav class="tabs" aria-label="Verktyg">
+      <a href="index.html">Dela skrivhäften</a>
+      <a href="kombinera.html" class="active" aria-current="page">Kombinera provdelar</a>
+    </nav>
+  </header>
+  <p class="lead">Sätter ihop varje elevs provdelar till en pdf per elev. Del 1 innehåller alla elevers första del efter varandra,
+  del 2 alla elevers andra del i samma ordning. Filerna lämnar aldrig din dator: allt sker i webbläsaren.</p>
+
+  <section class="panel">
+    <h2>1. Välj pdf-filer och sidor per elev</h2>
+    <div class="parts">
+      <div class="part">
+        <h3>Del 1</h3>
+        <label class="drop" id="drop1">
+          <input type="file" id="file1" accept="application/pdf,.pdf">
+          <strong>Klicka här eller släpp en pdf-fil</strong>
+          <span>Alla elevers första del, i elevordning</span>
+        </label>
+        <div class="filename" id="filename1"></div>
+        <label class="field">
+          <span>Sidor per elev i del 1</span>
+          <input type="number" id="per1" min="1" step="1" value="2">
+        </label>
+      </div>
+      <div class="part">
+        <h3>Del 2</h3>
+        <label class="drop" id="drop2">
+          <input type="file" id="file2" accept="application/pdf,.pdf">
+          <strong>Klicka här eller släpp en pdf-fil</strong>
+          <span>Alla elevers andra del, i samma elevordning</span>
+        </label>
+        <div class="filename" id="filename2"></div>
+        <label class="field">
+          <span>Sidor per elev i del 2</span>
+          <input type="number" id="per2" min="1" step="1" value="4">
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>2. Sätt ihop</h2>
+    <div class="grid">
+      <label class="field">
+        <span>Namn på filerna</span>
+        <input type="text" id="prefix" value="elev" spellcheck="false">
+        <small>Filerna döps till till exempel <code>elev-01.pdf</code>, <code>elev-02.pdf</code> och så vidare.</small>
+      </label>
+    </div>
+    <div class="actions">
+      <button id="run" disabled>Sätt ihop per elev</button>
+      <a class="button" id="download" hidden download>Ladda ner resultatet</a>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="log" id="log"></div>
+    <details id="fileList" hidden>
+      <summary>Ladda ner enskilda filer</summary>
+      <ul></ul>
+    </details>
+  </section>
+
+  <section class="panel" id="previewPanel" hidden>
+    <h2>3. Förhandsgranskning per elev</h2>
+    <p class="lead" style="margin-bottom:0">Under varje bild står vilken del och vilken sida i originalet den kommer från. Sidor från del 2 har blå ram.
+    Klicka på krysset uppe till höger för att ta bort en sida, till exempel en tom sida. Klicka igen för att ångra. Filerna uppdateras automatiskt.</p>
+    <div class="thumbs" id="thumbs"></div>
+    <div class="actions">
+      <button class="secondary" id="more" hidden>Visa fler sidor</button>
+    </div>
+  </section>
+
+  <footer>
+    Bygger på <a href="https://pdf-lib.js.org/">pdf-lib</a> och <a href="https://mozilla.github.io/pdf.js/">pdf.js</a>.
+    Öppna sidan direkt från hårddisken eller via GitHub Pages. Ingen server behövs.
+  </footer>
+</main>
+
+<script src="vendor/pdf-lib.min.js"></script>
+<script src="vendor/pdf.min.js"></script>
+<script src="common.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    prefix: $('prefix'),
+    run: $('run'), download: $('download'), status: $('status'), log: $('log'),
+    fileList: $('fileList'), fileListItems: $('fileList').querySelector('ul'),
+    previewPanel: $('previewPanel'), thumbs: $('thumbs'), more: $('more'),
+  };
+  const hasPdfjs = PDFfix.setupPdfjs();
+  const urls = new PDFfix.UrlPool();
+  const fileOpts = { urls, downloadEl: els.download, listEl: els.fileList, listItemsEl: els.fileListItems };
+  const setStatus = (text, kind) => PDFfix.setStatus(els.status, text, kind);
+  const log = (text) => PDFfix.log(els.log, text);
+
+  // The two source parts.
+  const parts = [1, 2].map((n) => ({
+    label: 'Del ' + n,
+    drop: $('drop' + n), input: $('file' + n), filename: $('filename' + n), per: $('per' + n),
+    bytes: null, name: '', pageCount: 0,
+    pdf: null,        // pdf.js document, for previews
+    thumbs: new Map(), // pageIndex -> canvas
+  }));
+
+  // Result of the last run:
+  // { srcs: [pdf-lib docs], students: [{ entries: [entry], file: {name, bytes} | null }], warn }
+  // entry: { part, pageIndex, removed, thumb }
+  let state = null;
+  let preview = null;   // { queue: [{ s, i }], pos }
+  const dirty = new Set();
+  const rebuilder = PDFfix.debouncedRunner(rebuild, 400);
+
+  // ---------- Reset ----------
+  function clearResult() {
+    rebuilder.cancel();
+    dirty.clear();
+    PDFfix.hideFiles(fileOpts);
+    els.previewPanel.hidden = true;
+    els.thumbs.innerHTML = '';
+    els.more.hidden = true;
+    els.log.textContent = '';
+    state = null;
+    preview = null;
+  }
+  function updateRunButton() {
+    els.run.disabled = !parts.some((p) => p.bytes);
+  }
+
+  // ---------- File handling ----------
+  parts.forEach((part) => {
+    PDFfix.bindDrop(part.drop, part.input, async (file) => {
+      if (!PDFfix.isPdfFile(file)) { setStatus('Välj en pdf-fil.', 'err'); return; }
+      clearResult();
+      if (part.pdf) { part.pdf.destroy(); part.pdf = null; }
+      part.thumbs = new Map();
+      part.bytes = await file.arrayBuffer();
+      part.name = file.name;
+      PDFfix.showFileName(part.filename, file);
+      try {
+        const doc = await PDFLib.PDFDocument.load(part.bytes, { ignoreEncryption: true });
+        part.pageCount = doc.getPageCount();
+        part.filename.append(' – ' + PDFfix.plural(part.pageCount, 'sida', 'sidor'));
+      } catch (err) {
+        console.error(err);
+        part.pageCount = 0;
+      }
+      updateRunButton();
+      setStatus('Klar att sätta ihop.', '');
+    });
+  });
+
+  function perStudent(part) {
+    const n = Number(part.per.value);
+    if (!Number.isInteger(n) || n < 1) throw new Error('Sidor per elev i ' + part.label.toLowerCase() + ' måste vara ett heltal större än 0.');
+    return n;
+  }
+  function prefix() {
+    const p = els.prefix.value.trim().replace(/[\\/:*?"<>|]/g, '-');
+    return p || 'elev';
+  }
+
+  // ---------- Core processing ----------
+  async function process() {
+    const { PDFDocument } = PDFLib;
+    const active = parts.filter((p) => p.bytes);
+    if (active.length === 0) throw new Error('Välj minst en pdf-fil.');
+    const per = parts.map((p) => (p.bytes ? perStudent(p) : 0));
+
+    const srcs = [];
+    for (let k = 0; k < parts.length; k++) {
+      srcs[k] = parts[k].bytes ? await PDFDocument.load(parts[k].bytes, { ignoreEncryption: true }) : null;
+      if (srcs[k]) parts[k].pageCount = srcs[k].getPageCount();
+    }
+
+    const counts = parts.map((p, k) => (srcs[k] ? Math.ceil(p.pageCount / per[k]) : 0));
+    const nStudents = Math.max(...counts);
+    if (nStudents === 0) throw new Error('Filerna innehåller inga sidor.');
+
+    const students = [];
+    for (let s = 0; s < nStudents; s++) {
+      const entries = [];
+      for (let k = 0; k < parts.length; k++) {
+        if (!srcs[k]) continue;
+        const start = s * per[k];
+        for (let j = 0; j < per[k] && start + j < parts[k].pageCount; j++) {
+          entries.push({ part: k, pageIndex: start + j, removed: false });
+        }
+      }
+      students.push({ entries, file: null });
+    }
+
+    state = { srcs, students, per, counts, warn: false };
+
+    // Report
+    parts.forEach((p, k) => {
+      if (!srcs[k]) { log(p.label + ': ingen fil vald.'); return; }
+      log(p.label + ': ' + p.pageCount + ' sidor, ' + per[k] + ' per elev, ger ' + PDFfix.plural(counts[k], 'elev', 'elever') + '.');
+      if (p.pageCount % per[k] !== 0) {
+        state.warn = true;
+        log('Obs: ' + p.pageCount + ' sidor i ' + p.label.toLowerCase() + ' går inte jämnt upp med ' + per[k] + ' per elev. Sista eleven får ' + (p.pageCount % per[k]) + ' sidor därifrån.');
+      }
+    });
+    if (srcs[0] && srcs[1] && counts[0] !== counts[1]) {
+      state.warn = true;
+      log('Obs: delarna ger olika många elever (' + counts[0] + ' och ' + counts[1] + '). Kontrollera att rätt antal sidor per elev är angivet. De sista eleverna får bara sidor från den ena delen.');
+    }
+    log('Resultat: ' + PDFfix.plural(nStudents, 'fil', 'filer') + ', en per elev.');
+  }
+
+  function fileName(s) {
+    const pad = Math.max(2, String(state.students.length).length);
+    return prefix() + '-' + String(s + 1).padStart(pad, '0') + '.pdf';
+  }
+
+  // Builds the pdf for student `s`, skipping removed pages.
+  async function buildStudent(s) {
+    const { PDFDocument } = PDFLib;
+    const entries = state.students[s].entries.filter((e) => !e.removed);
+    if (entries.length === 0) { state.students[s].file = null; return; }
+    const out = await PDFDocument.create();
+    // Copy per source document, keeping the entry order (part 1 first, then part 2).
+    const pages = new Array(entries.length);
+    for (let k = 0; k < state.srcs.length; k++) {
+      const idx = [];
+      entries.forEach((e, i) => { if (e.part === k) idx.push(i); });
+      if (idx.length === 0) continue;
+      const copied = await out.copyPages(state.srcs[k], idx.map((i) => entries[i].pageIndex));
+      copied.forEach((page, j) => { pages[idx[j]] = page; });
+    }
+    pages.forEach((page) => out.addPage(page));
+    out.setTitle(prefix() + ' ' + (s + 1));
+    out.setProducer('PDFfix');
+    state.students[s].file = { name: fileName(s), bytes: await out.save() };
+  }
+
+  function publish() {
+    const files = state.students.map((st) => st.file).filter(Boolean);
+    if (files.length === 0) throw new Error('Alla sidor är borttagna. Det finns inget att ladda ner.');
+    PDFfix.publishFiles(Object.assign({ files, zipName: prefix() + '.zip' }, fileOpts));
+  }
+  function doneStatus() {
+    const removed = state.students.reduce((sum, st) => sum + st.entries.filter((e) => e.removed).length, 0);
+    let text = state.warn ? 'Klart, med anmärkning.' : 'Klart!';
+    if (removed > 0) text += ' ' + PDFfix.plural(removed, 'sida borttagen.', 'sidor borttagna.');
+    setStatus(text, state.warn ? 'warn' : 'ok');
+  }
+
+  els.run.addEventListener('click', async () => {
+    clearResult();
+    els.run.disabled = true;
+    setStatus('Bearbetar…', '');
+    try {
+      await process();
+      for (let s = 0; s < state.students.length; s++) {
+        setStatus('Bearbetar elev ' + (s + 1) + ' av ' + state.students.length + '…', '');
+        await buildStudent(s);
+      }
+      publish();
+      doneStatus();
+      await showPreview();
+    } catch (err) {
+      console.error(err);
+      setStatus('Det gick inte: ' + (err && err.message ? err.message : err), 'err');
+    } finally {
+      updateRunButton();
+    }
+  });
+
+  // ---------- Removing pages ----------
+  function toggleRemoved(s, entry) {
+    entry.removed = !entry.removed;
+    entry.thumb.setRemoved(entry.removed);
+    dirty.add(s);
+    rebuilder.schedule();
+  }
+  async function rebuild() {
+    if (!state) return;
+    els.run.disabled = true;
+    setStatus('Uppdaterar filerna…', '');
+    try {
+      for (const s of Array.from(dirty)) { dirty.delete(s); await buildStudent(s); }
+      publish();
+      doneStatus();
+    } catch (err) {
+      console.error(err);
+      PDFfix.hideFiles(fileOpts);
+      setStatus(err && err.message ? err.message : String(err), 'err');
+    } finally {
+      updateRunButton();
+    }
+  }
+
+  // ---------- Preview ----------
+  const PREVIEW_BATCH = 16;
+
+  async function showPreview() {
+    if (!hasPdfjs || !state) return;
+    els.previewPanel.hidden = false;
+    try {
+      for (const part of parts) {
+        if (part.bytes && !part.pdf) part.pdf = await PDFfix.openPdfjs(part.bytes);
+      }
+      const queue = [];
+      state.students.forEach((st, s) => st.entries.forEach((entry, i) => queue.push({ s, i })));
+      preview = { queue, pos: 0 };
+      await renderMore();
+    } catch (err) {
+      console.error(err);
+      log('Förhandsgranskningen kunde inte visas (' + err.message + '), men filerna går ändå att ladda ner.');
+    }
+  }
+  async function thumbFor(entry) {
+    const part = parts[entry.part];
+    let canvas = part.thumbs.get(entry.pageIndex);
+    if (!canvas) {
+      canvas = await PDFfix.renderPage(part.pdf, entry.pageIndex, PDFfix.THUMB_WIDTH);
+      part.thumbs.set(entry.pageIndex, canvas);
+    }
+    return canvas;
+  }
+  async function renderMore() {
+    if (!preview) return;
+    const { queue } = preview;
+    const end = Math.min(queue.length, preview.pos + PREVIEW_BATCH);
+    els.more.hidden = true;
+    for (let q = preview.pos; q < end; q++) {
+      const { s, i } = queue[q];
+      const entry = state.students[s].entries[i];
+      if (i === 0) els.thumbs.appendChild(PDFfix.heading(fileName(s)));
+      const canvas = await thumbFor(entry);
+      entry.thumb = PDFfix.makeThumb({
+        canvas,
+        label: 'Sida ' + (i + 1),
+        origin: parts[entry.part].label + ', sida ' + (entry.pageIndex + 1),
+        removed: entry.removed,
+        className: entry.part === 1 ? 'part2' : '',
+        onToggle: () => toggleRemoved(s, entry),
+      });
+      els.thumbs.appendChild(entry.thumb.el);
+    }
+    preview.pos = end;
+    els.more.hidden = end >= queue.length;
+    els.more.textContent = 'Visa fler sidor (' + (queue.length - end) + ' kvar)';
+  }
+  els.more.addEventListener('click', renderMore);
+})();
+</script>
+</body>
+</html>

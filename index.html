@@ -3,193 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Skrivhäftesfix</title>
+<title>PDFfix: Dela skrivhäften</title>
 <meta name="description" content="Delar skannade A3-skrivhäften i A4-sidor och sorterar om dem i läsordning. Allt sker lokalt i webbläsaren.">
-<style>
-  :root {
-    --bg: #f6f5f1;
-    --panel: #ffffff;
-    --text: #1d1d1b;
-    --muted: #6b6a66;
-    --line: #dcdad3;
-    --accent: #1f5f8b;
-    --accent-text: #ffffff;
-    --ok: #2d7a3e;
-    --warn: #a15c00;
-    --err: #b3261e;
-    --drop: #eef3f7;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #17181a;
-      --panel: #202225;
-      --text: #ecebe6;
-      --muted: #a3a29c;
-      --line: #3a3c40;
-      --accent: #6aa9d8;
-      --accent-text: #0e1116;
-      --ok: #7ccd8c;
-      --warn: #e5a94a;
-      --err: #f28b82;
-      --drop: #24303a;
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg: #17181a;
-    --panel: #202225;
-    --text: #ecebe6;
-    --muted: #a3a29c;
-    --line: #3a3c40;
-    --accent: #6aa9d8;
-    --accent-text: #0e1116;
-    --ok: #7ccd8c;
-    --warn: #e5a94a;
-    --err: #f28b82;
-    --drop: #24303a;
-  }
-  * { box-sizing: border-box; }
-  [hidden] { display: none !important; }
-  html, body { margin: 0; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    padding: 24px 16px 64px;
-  }
-  main { max-width: 960px; margin: 0 auto; }
-  h1 { font-size: 1.6rem; margin: 0 0 4px; }
-  h2 { font-size: 1.1rem; margin: 0 0 12px; }
-  h3 { font-size: 1rem; margin: 18px 0 6px; grid-column: 1 / -1; }
-  h3:first-child { margin-top: 0; }
-  p.lead { color: var(--muted); margin: 0 0 24px; }
-  .panel {
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 20px;
-    margin-bottom: 20px;
-  }
-  .drop {
-    display: block;
-    border: 2px dashed var(--line);
-    border-radius: 10px;
-    padding: 28px 16px;
-    text-align: center;
-    cursor: pointer;
-    background: var(--drop);
-    transition: border-color .15s;
-  }
-  .drop.over, .drop:hover { border-color: var(--accent); }
-  .drop input { display: none; }
-  .drop strong { display: block; margin-bottom: 4px; }
-  .drop span { color: var(--muted); font-size: .95rem; }
-  .filename { margin-top: 12px; font-size: .95rem; }
-  .filename b { font-weight: 600; }
-  .grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
-  @media (min-width: 640px) { .grid { grid-template-columns: 1fr 1fr; } }
-  label.field { display: block; }
-  label.field > span { display: block; font-weight: 600; margin-bottom: 4px; }
-  label.field small { display: block; color: var(--muted); font-weight: 400; margin-top: 4px; }
-  .row { display: flex; gap: 8px; }
-  .row select { flex: 1; }
-  .row input[type="number"] { width: 6em; }
-  select, input[type="text"], input[type="number"] {
-    width: 100%;
-    font: inherit;
-    padding: 8px 10px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--bg);
-    color: var(--text);
-  }
-  label.check { display: flex; gap: 10px; align-items: flex-start; }
-  label.check input { margin-top: 5px; }
-  label.check small { display: block; color: var(--muted); }
-  .actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 18px; }
-  button, a.button {
-    font: inherit;
-    font-weight: 600;
-    padding: 10px 18px;
-    border-radius: 8px;
-    border: 1px solid var(--accent);
-    background: var(--accent);
-    color: var(--accent-text);
-    cursor: pointer;
-    text-decoration: none;
-    display: inline-block;
-  }
-  button.secondary {
-    background: transparent;
-    color: var(--accent);
-  }
-  button:disabled { opacity: .45; cursor: not-allowed; }
-  .status { font-size: .95rem; }
-  .status.ok { color: var(--ok); }
-  .status.warn { color: var(--warn); }
-  .status.err { color: var(--err); }
-  .log { font-size: .9rem; color: var(--muted); margin-top: 8px; white-space: pre-wrap; }
-  .thumbs {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 14px;
-    margin-top: 12px;
-  }
-  .thumb { position: relative; text-align: center; font-size: .8rem; color: var(--muted); }
-  .thumb canvas {
-    width: 100%;
-    height: auto;
-    border: 1px solid var(--line);
-    background: #fff;
-    display: block;
-    margin-bottom: 4px;
-    transition: opacity .15s;
-  }
-  .thumb b { color: var(--text); display: block; }
-  .thumb .remove {
-    position: absolute;
-    top: 6px;
-    right: 6px;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    border-radius: 50%;
-    border: 1px solid var(--line);
-    background: var(--panel);
-    color: var(--text);
-    font-size: 15px;
-    font-weight: 600;
-    line-height: 26px;
-    text-align: center;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
-    opacity: .9;
-  }
-  .thumb .remove:hover, .thumb .remove:focus-visible {
-    opacity: 1;
-    background: var(--err);
-    border-color: var(--err);
-    color: #fff;
-  }
-  .thumb.removed canvas { opacity: .2; }
-  .thumb.removed b { text-decoration: line-through; }
-  .thumb.removed .remove,
-  .thumb.removed .remove:hover, .thumb.removed .remove:focus-visible {
-    opacity: 1;
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--accent-text);
-  }
-  details { margin-top: 12px; font-size: .95rem; }
-  summary { cursor: pointer; color: var(--accent); }
-  details ul { margin: 8px 0 0; padding-left: 20px; columns: 2; column-gap: 24px; }
-  details li { break-inside: avoid; }
-  details a { color: var(--accent); }
-  code { font-size: .9em; }
-  footer { color: var(--muted); font-size: .85rem; margin-top: 32px; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <main>
-  <h1>Skrivhäftesfix</h1>
+  <header class="site">
+    <h1>PDFfix</h1>
+    <nav class="tabs" aria-label="Verktyg">
+      <a href="index.html" class="active" aria-current="page">Dela skrivhäften</a>
+      <a href="kombinera.html">Kombinera provdelar</a>
+    </nav>
+  </header>
   <p class="lead">Delar skannade A3-skrivhäften (liggande) i stående A4-sidor och sorterar om dem i läsordning.
   Filen lämnar aldrig din dator: allt sker i webbläsaren.</p>
 
@@ -273,6 +99,7 @@
 
 <script src="vendor/pdf-lib.min.js"></script>
 <script src="vendor/pdf.min.js"></script>
+<script src="common.js"></script>
 <script>
 (function () {
   'use strict';
@@ -286,46 +113,29 @@
     fileList: $('fileList'), fileListItems: $('fileList').querySelector('ul'),
     previewPanel: $('previewPanel'), thumbs: $('thumbs'), more: $('more'),
   };
+  const hasPdfjs = PDFfix.setupPdfjs();
+  const urls = new PDFfix.UrlPool();
+  const fileOpts = { urls, downloadEl: els.download, listEl: els.fileList, listItemsEl: els.fileListItems };
+  const setStatus = (text, kind) => PDFfix.setStatus(els.status, text, kind);
+  const log = (text) => PDFfix.log(els.log, text);
 
   let sourceBytes = null;   // ArrayBuffer of the loaded PDF
   let sourceName = '';
   let srcPdf = null;        // pdf.js document of the source, for previews
   let thumbCache = new Map(); // srcIndex -> { full?, left?, right? } canvases
-  let objectUrls = [];      // blob URLs of the results
-  // Result of the last run: { src (pdf-lib doc), chunks: [[entry]], perFile, stats, warn }
-  // entry: { srcIndex, half: 'left' | 'right' | null, box, removed, el, btn }
+  // Result of the last run:
+  // { src (pdf-lib doc), chunks: [[entry]], files: [{name, bytes} | null], perFile, warn, stats }
+  // entry: { srcIndex, half: 'left' | 'right' | null, box, removed, thumb }
   let state = null;
   let preview = null;       // { queue: [{ c, i }], pos, multi }
-  let rebuildTimer = null;
-  let rebuilding = false;
-  let rebuildPending = false;
+  const dirty = new Set();  // chunk indexes whose file must be rebuilt
+  const rebuilder = PDFfix.debouncedRunner(rebuild, 400);
 
-  if (window.pdfjsLib) {
-    // Works from file:// too: if the real worker cannot start, pdf.js
-    // falls back to running the worker code on the main thread.
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
-  }
-
-  // ---------- UI helpers ----------
-  function setStatus(text, kind) {
-    els.status.textContent = text;
-    els.status.className = 'status' + (kind ? ' ' + kind : '');
-  }
-  function log(text) {
-    els.log.textContent += (els.log.textContent ? '\n' : '') + text;
-  }
-  function revokeUrls() {
-    objectUrls.forEach((u) => URL.revokeObjectURL(u));
-    objectUrls = [];
-  }
+  // ---------- Reset ----------
   function clearResult() {
-    clearTimeout(rebuildTimer);
-    revokeUrls();
-    els.download.hidden = true;
-    els.download.removeAttribute('href');
-    els.fileList.hidden = true;
-    els.fileList.open = false;
-    els.fileListItems.innerHTML = '';
+    rebuilder.cancel();
+    dirty.clear();
+    PDFfix.hideFiles(fileOpts);
     els.previewPanel.hidden = true;
     els.thumbs.innerHTML = '';
     els.more.hidden = true;
@@ -333,48 +143,23 @@
     state = null;
     preview = null;
   }
-  function makeUrl(bytes, type) {
-    const url = URL.createObjectURL(new Blob([bytes], { type }));
-    objectUrls.push(url);
-    return url;
-  }
   function baseName() {
-    return (sourceName || 'skrivhaften').replace(/\.pdf$/i, '');
+    return PDFfix.stripPdf(sourceName) || 'skrivhaften';
   }
 
   // ---------- File handling ----------
   async function loadFile(file) {
-    if (!file) return;
-    if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
-      setStatus('Välj en pdf-fil.', 'err');
-      return;
-    }
+    if (!PDFfix.isPdfFile(file)) { setStatus('Välj en pdf-fil.', 'err'); return; }
     clearResult();
     if (srcPdf) { srcPdf.destroy(); srcPdf = null; }
     thumbCache = new Map();
     sourceBytes = await file.arrayBuffer();
     sourceName = file.name;
-    els.filename.innerHTML = 'Vald fil: <b></b> (' + formatSize(file.size) + ')';
-    els.filename.querySelector('b').textContent = file.name;
+    PDFfix.showFileName(els.filename, file);
     els.run.disabled = false;
     setStatus('Klar att bearbeta.', '');
   }
-  function formatSize(bytes) {
-    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' kB';
-    return (bytes / 1024 / 1024).toFixed(1) + ' MB';
-  }
-
-  els.file.addEventListener('change', () => loadFile(els.file.files[0]));
-  ['dragenter', 'dragover'].forEach((ev) => els.drop.addEventListener(ev, (e) => {
-    e.preventDefault(); els.drop.classList.add('over');
-  }));
-  ['dragleave', 'drop'].forEach((ev) => els.drop.addEventListener(ev, (e) => {
-    e.preventDefault(); els.drop.classList.remove('over');
-  }));
-  els.drop.addEventListener('drop', (e) => {
-    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-    loadFile(file);
-  });
+  PDFfix.bindDrop(els.drop, els.file, loadFile);
 
   // ---------- Order settings ----------
   els.preset.addEventListener('change', () => {
@@ -419,8 +204,7 @@
   // Returns the visually left and right halves of a page as boxes in the
   // page's own (unrotated) coordinate system, taking /Rotate into account.
   function halfBoxes(page) {
-    const mb = page.getMediaBox();
-    const { x, y, width: w, height: h } = mb;
+    const { x, y, width: w, height: h } = page.getMediaBox();
     let rot = page.getRotation().angle % 360;
     if (rot < 0) rot += 360;
     const halfW = w / 2, halfH = h / 2;
@@ -445,20 +229,6 @@
   }
 
   // ---------- Core processing ----------
-  // Builds one output PDF from a list of entries { srcIndex, box }.
-  async function buildDoc(src, entries, title) {
-    const { PDFDocument } = PDFLib;
-    const out = await PDFDocument.create();
-    const copied = await out.copyPages(src, entries.map((e) => e.srcIndex));
-    copied.forEach((page, k) => {
-      if (entries[k].box) applyBox(page, entries[k].box);
-      out.addPage(page);
-    });
-    out.setTitle(title);
-    out.setProducer('Skrivhäftesfix');
-    return out.save();
-  }
-
   // Reads the settings, splits and sorts the pages and stores the plan in `state`.
   async function process() {
     const { PDFDocument } = PDFLib;
@@ -508,7 +278,7 @@
 
     const lastShort = perFile > 0 && chunks.length > 0 && chunks[chunks.length - 1].length < perFile;
     state = {
-      src, chunks, perFile, warn: false,
+      src, chunks, perFile, warn: false, files: new Array(chunks.length).fill(null),
       stats: {
         srcCount: srcPages.length, splitCount, keptCount, outCount: sorted.length,
         remainder: remainder.length, groupSize: n, perFile, lastShort,
@@ -524,57 +294,31 @@
     return baseName() + '-hafte-' + String(c + 1).padStart(pad, '0') + '.pdf';
   }
 
-  // Builds the output files from `state`, skipping removed pages.
-  async function buildFiles() {
-    const files = [];
-    for (let c = 0; c < state.chunks.length; c++) {
-      const entries = state.chunks[c].filter((e) => !e.removed);
-      if (entries.length === 0) continue;
-      const title = state.perFile === 0 ? baseName() + ' (sorterad)' : baseName() + ' häfte ' + (c + 1);
-      setStatus('Bearbetar fil ' + (c + 1) + ' av ' + state.chunks.length + '…', '');
-      const bytes = await buildDoc(state.src, entries, title);
-      files.push({ name: fileName(c), bytes });
-    }
+  // Builds the output file for chunk `c`, skipping removed pages.
+  async function buildChunk(c) {
+    const { PDFDocument } = PDFLib;
+    const entries = state.chunks[c].filter((e) => !e.removed);
+    if (entries.length === 0) { state.files[c] = null; return; }
+    const out = await PDFDocument.create();
+    const copied = await out.copyPages(state.src, entries.map((e) => e.srcIndex));
+    copied.forEach((page, k) => {
+      if (entries[k].box) applyBox(page, entries[k].box);
+      out.addPage(page);
+    });
+    out.setTitle(state.perFile === 0 ? baseName() + ' (sorterad)' : baseName() + ' häfte ' + (c + 1));
+    out.setProducer('PDFfix');
+    state.files[c] = { name: fileName(c), bytes: await out.save() };
+  }
+
+  function publish() {
+    const files = state.files.filter(Boolean);
     if (files.length === 0) throw new Error('Alla sidor är borttagna. Det finns inget att ladda ner.');
-    return files;
-  }
-
-  // Updates the download button and the file list.
-  function publishFiles(files) {
-    revokeUrls();
-    els.fileListItems.innerHTML = '';
-    if (files.length === 1) {
-      const f = files[0];
-      els.download.href = makeUrl(f.bytes, 'application/pdf');
-      els.download.download = f.name;
-      els.download.textContent = 'Ladda ner resultatet';
-      els.fileList.hidden = true;
-    } else {
-      const zipBytes = makeZip(files.map((f) => ({ name: f.name, data: f.bytes })));
-      els.download.href = makeUrl(zipBytes, 'application/zip');
-      els.download.download = baseName() + '-haften.zip';
-      els.download.textContent = 'Ladda ner alla som zip (' + files.length + ' filer)';
-      files.forEach((f) => {
-        const li = document.createElement('li');
-        const a = document.createElement('a');
-        a.href = makeUrl(f.bytes, 'application/pdf');
-        a.download = f.name;
-        a.textContent = f.name;
-        li.appendChild(a);
-        els.fileListItems.appendChild(li);
-      });
-      els.fileList.hidden = false;
-    }
-    els.download.hidden = false;
-  }
-
-  function removedCount() {
-    return state.chunks.reduce((s, chunk) => s + chunk.filter((e) => e.removed).length, 0);
+    PDFfix.publishFiles(Object.assign({ files, zipName: baseName() + '-haften.zip' }, fileOpts));
   }
   function doneStatus() {
-    const removed = removedCount();
+    const removed = state.chunks.reduce((s, chunk) => s + chunk.filter((e) => e.removed).length, 0);
     let text = state.warn ? 'Klart, med anmärkning.' : 'Klart!';
-    if (removed > 0) text += ' ' + removed + (removed === 1 ? ' sida borttagen.' : ' sidor borttagna.');
+    if (removed > 0) text += ' ' + PDFfix.plural(removed, 'sida borttagen.', 'sidor borttagna.');
     setStatus(text, state.warn ? 'warn' : 'ok');
   }
 
@@ -601,7 +345,11 @@
           log('Obs: den sista filen fick bara ' + s.lastSize + ' sidor.');
         }
       }
-      publishFiles(await buildFiles());
+      for (let c = 0; c < state.chunks.length; c++) {
+        setStatus('Bearbetar fil ' + (c + 1) + ' av ' + state.chunks.length + '…', '');
+        await buildChunk(c);
+      }
+      publish();
       doneStatus();
       await showPreview();
     } catch (err) {
@@ -613,122 +361,27 @@
   });
 
   // ---------- Removing pages ----------
-  function toggleRemoved(entry) {
+  function toggleRemoved(c, entry) {
     entry.removed = !entry.removed;
-    entry.el.classList.toggle('removed', entry.removed);
-    entry.btn.textContent = entry.removed ? '↶' : '✕';
-    entry.btn.title = entry.removed ? 'Ångra borttagning' : 'Ta bort sidan';
-    entry.btn.setAttribute('aria-label', entry.btn.title);
-    entry.btn.setAttribute('aria-pressed', entry.removed ? 'true' : 'false');
-    scheduleRebuild();
-  }
-  function scheduleRebuild() {
-    clearTimeout(rebuildTimer);
-    rebuildTimer = setTimeout(rebuild, 400);
+    entry.thumb.setRemoved(entry.removed);
+    dirty.add(c);
+    rebuilder.schedule();
   }
   async function rebuild() {
     if (!state) return;
-    if (rebuilding) { rebuildPending = true; return; }
-    rebuilding = true;
     els.run.disabled = true;
     setStatus('Uppdaterar filerna…', '');
     try {
-      publishFiles(await buildFiles());
+      for (const c of Array.from(dirty)) { dirty.delete(c); await buildChunk(c); }
+      publish();
       doneStatus();
     } catch (err) {
       console.error(err);
-      revokeUrls();
-      els.download.hidden = true;
-      els.fileList.hidden = true;
+      PDFfix.hideFiles(fileOpts);
       setStatus(err && err.message ? err.message : String(err), 'err');
     } finally {
-      rebuilding = false;
       els.run.disabled = false;
-      if (rebuildPending) { rebuildPending = false; rebuild(); }
     }
-  }
-
-  // ---------- Minimal ZIP writer (store only, no compression) ----------
-  const CRC_TABLE = (() => {
-    const t = new Uint32Array(256);
-    for (let n = 0; n < 256; n++) {
-      let c = n;
-      for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
-      t[n] = c >>> 0;
-    }
-    return t;
-  })();
-  function crc32(bytes) {
-    let c = 0xFFFFFFFF;
-    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
-    return (c ^ 0xFFFFFFFF) >>> 0;
-  }
-  function dosDateTime(d) {
-    const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
-    const date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
-    return { time, date };
-  }
-  function makeZip(entries) {
-    const enc = new TextEncoder();
-    const now = dosDateTime(new Date());
-    const parts = [];
-    const central = [];
-    let offset = 0;
-    for (const e of entries) {
-      const name = enc.encode(e.name);
-      const data = e.data instanceof Uint8Array ? e.data : new Uint8Array(e.data);
-      const crc = crc32(data);
-      const local = new DataView(new ArrayBuffer(30));
-      local.setUint32(0, 0x04034b50, true);
-      local.setUint16(4, 20, true);        // version needed
-      local.setUint16(6, 0x0800, true);    // flags: UTF-8 names
-      local.setUint16(8, 0, true);         // method: store
-      local.setUint16(10, now.time, true);
-      local.setUint16(12, now.date, true);
-      local.setUint32(14, crc, true);
-      local.setUint32(18, data.length, true);
-      local.setUint32(22, data.length, true);
-      local.setUint16(26, name.length, true);
-      local.setUint16(28, 0, true);
-      parts.push(new Uint8Array(local.buffer), name, data);
-
-      const cd = new DataView(new ArrayBuffer(46));
-      cd.setUint32(0, 0x02014b50, true);
-      cd.setUint16(4, 20, true);           // version made by
-      cd.setUint16(6, 20, true);           // version needed
-      cd.setUint16(8, 0x0800, true);
-      cd.setUint16(10, 0, true);
-      cd.setUint16(12, now.time, true);
-      cd.setUint16(14, now.date, true);
-      cd.setUint32(16, crc, true);
-      cd.setUint32(20, data.length, true);
-      cd.setUint32(24, data.length, true);
-      cd.setUint16(28, name.length, true);
-      cd.setUint16(30, 0, true);           // extra
-      cd.setUint16(32, 0, true);           // comment
-      cd.setUint16(34, 0, true);           // disk
-      cd.setUint16(36, 0, true);           // internal attrs
-      cd.setUint32(38, 0, true);           // external attrs
-      cd.setUint32(42, offset, true);
-      central.push(new Uint8Array(cd.buffer), name);
-      offset += 30 + name.length + data.length;
-    }
-    const cdSize = central.reduce((s, p) => s + p.length, 0);
-    const end = new DataView(new ArrayBuffer(22));
-    end.setUint32(0, 0x06054b50, true);
-    end.setUint16(4, 0, true);
-    end.setUint16(6, 0, true);
-    end.setUint16(8, entries.length, true);
-    end.setUint16(10, entries.length, true);
-    end.setUint32(12, cdSize, true);
-    end.setUint32(16, offset, true);
-    end.setUint16(20, 0, true);
-    const all = [...parts, ...central, new Uint8Array(end.buffer)];
-    const total = all.reduce((s, p) => s + p.length, 0);
-    const out = new Uint8Array(total);
-    let pos = 0;
-    for (const p of all) { out.set(p, pos); pos += p.length; }
-    return out;
   }
 
   // ---------- Preview ----------
@@ -736,13 +389,12 @@
   // pages the way a viewer does, rotation included) and cropped to the
   // half that each output page uses.
   const PREVIEW_BATCH = 16;
-  const THUMB_WIDTH = 240;
 
   async function showPreview() {
-    if (!window.pdfjsLib || !state) return;
+    if (!hasPdfjs || !state) return;
     els.previewPanel.hidden = false;
     try {
-      if (!srcPdf) srcPdf = await pdfjsLib.getDocument({ data: sourceBytes.slice(0) }).promise;
+      if (!srcPdf) srcPdf = await PDFfix.openPdfjs(sourceBytes);
       const queue = [];
       state.chunks.forEach((chunk, c) => chunk.forEach((entry, i) => queue.push({ c, i })));
       preview = { queue, pos: 0, multi: state.chunks.length > 1 };
@@ -752,40 +404,22 @@
       log('Förhandsgranskningen kunde inte visas (' + err.message + '), men filerna går ändå att ladda ner.');
     }
   }
-
-  function cropCanvas(src, x, w) {
-    const c = document.createElement('canvas');
-    c.width = w;
-    c.height = src.height;
-    c.getContext('2d').drawImage(src, x, 0, w, src.height, 0, 0, w, src.height);
-    return c;
-  }
   async function thumbFor(entry) {
     let cached = thumbCache.get(entry.srcIndex);
     if (!cached) { cached = {}; thumbCache.set(entry.srcIndex, cached); }
     const key = entry.half || 'full';
     if (cached[key]) return cached[key];
-
-    const page = await srcPdf.getPage(entry.srcIndex + 1);
-    const base = page.getViewport({ scale: 1 });
-    const width = entry.half ? THUMB_WIDTH * 2 : THUMB_WIDTH;
-    const viewport = page.getViewport({ scale: width / base.width });
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.ceil(viewport.width);
-    canvas.height = Math.ceil(viewport.height);
-    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-    page.cleanup();
-
+    const width = entry.half ? PDFfix.THUMB_WIDTH * 2 : PDFfix.THUMB_WIDTH;
+    const canvas = await PDFfix.renderPage(srcPdf, entry.srcIndex, width);
     if (entry.half) {
       const halfW = Math.floor(canvas.width / 2);
-      cached.left = cropCanvas(canvas, 0, halfW);
-      cached.right = cropCanvas(canvas, halfW, canvas.width - halfW);
+      cached.left = PDFfix.cropCanvas(canvas, 0, halfW);
+      cached.right = PDFfix.cropCanvas(canvas, halfW, canvas.width - halfW);
     } else {
       cached.full = canvas;
     }
     return cached[key];
   }
-
   async function renderMore() {
     if (!preview) return;
     const { queue } = preview;
@@ -794,31 +428,16 @@
     for (let q = preview.pos; q < end; q++) {
       const { c, i } = queue[q];
       const entry = state.chunks[c][i];
-      if (preview.multi && i === 0) {
-        const h = document.createElement('h3');
-        h.textContent = fileName(c);
-        els.thumbs.appendChild(h);
-      }
+      if (preview.multi && i === 0) els.thumbs.appendChild(PDFfix.heading(fileName(c)));
       const canvas = await thumbFor(entry);
-
-      const div = document.createElement('div');
-      div.className = 'thumb' + (entry.removed ? ' removed' : '');
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'remove';
-      btn.textContent = entry.removed ? '↶' : '✕';
-      btn.title = entry.removed ? 'Ångra borttagning' : 'Ta bort sidan';
-      btn.setAttribute('aria-label', btn.title);
-      btn.setAttribute('aria-pressed', entry.removed ? 'true' : 'false');
-      btn.addEventListener('click', () => toggleRemoved(entry));
-      const label = document.createElement('b');
-      label.textContent = (preview.multi ? 'Sida ' : 'Ny sida ') + (i + 1);
-      const origin = document.createElement('span');
-      origin.textContent = 'från sida ' + (entry.srcIndex + 1) + (entry.half ? (entry.half === 'left' ? ' V' : ' H') : '');
-      div.append(canvas, btn, label, origin);
-      entry.el = div;
-      entry.btn = btn;
-      els.thumbs.appendChild(div);
+      entry.thumb = PDFfix.makeThumb({
+        canvas,
+        label: (preview.multi ? 'Sida ' : 'Ny sida ') + (i + 1),
+        origin: 'från sida ' + (entry.srcIndex + 1) + (entry.half ? (entry.half === 'left' ? ' V' : ' H') : ''),
+        removed: entry.removed,
+        onToggle: () => toggleRemoved(c, entry),
+      });
+      els.thumbs.appendChild(entry.thumb.el);
     }
     preview.pos = end;
     els.more.hidden = end >= queue.length;
