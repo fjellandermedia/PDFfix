@@ -1,0 +1,42 @@
+name: Skala bilder
+
+on:
+  push:
+    paths:
+      - "inbox/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bilder
+  cancel-in-progress: false
+
+jobs:
+  skala:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installera Pillow
+        run: pip install Pillow
+
+      - name: Skala bilder
+        run: python skript/skala.py --inbox inbox --ut bilder --size 640 --quality 75
+
+      - name: Commit och push
+        run: |
+          git config user.name bildrobot
+          git config user.email bildrobot@users.noreply.github.com
+          git add bilder
+          if git diff --cached --quiet; then
+            echo "Inget att committa."
+          else
+            git commit -m "Skalade bilder"
+            git push
+          fi
